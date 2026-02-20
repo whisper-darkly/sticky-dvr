@@ -1,0 +1,17 @@
+resolution: 720
+framerate: 30
+out_pattern: "/data/recordings/{{.Driver}}/{{.Source}}/{{.Session.Year}}-{{.Session.Month}}-{{.Session.Day}}_{{.Session.Hour}}-{{.Session.Minute}}-{{.Session.Second}}/{{.Recording.Year}}-{{.Recording.Month}}-{{.Recording.Day}}_{{.Recording.Hour}}-{{.Recording.Minute}}-{{.Recording.Second}}"
+log_pattern: ""
+segment_length: ""
+check_interval: "1m"
+retry_delay: "5s"
+segment_timeout: "5m"
+recording_timeout: "30m"
+log_level: "error"
+output_format: "json"
+user_agent: ""
+cookies: ""
+restart_delay: "30s"
+reconcile_interval: "60s"
+error_threshold: 5
+error_window: "5m"

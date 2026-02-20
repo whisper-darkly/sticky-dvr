@@ -1,0 +1,6 @@
+# Phase 2 — sticky-proxy
+# NGINX reverse-proxy with JWT validation (Lua/NJS plugin).
+# Placeholder until proxy config is implemented.
+FROM nginx:1.27-alpine
+
+EXPOSE 80 443

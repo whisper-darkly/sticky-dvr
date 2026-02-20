@@ -1,0 +1,45 @@
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /src
+
+COPY backend/go.mod backend/go.sum ./backend/
+RUN cd backend && go mod download
+
+COPY backend/ ./backend/
+COPY VERSION .
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+
+# Build the main backend binary.
+RUN cd backend && CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+    -o /out/sticky-backend \
+    .
+
+# Build the db-init binary.
+RUN cd backend && CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+    -o /out/sticky-initdb \
+    ./cmd/initdb/
+
+
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=builder /out/sticky-backend  /usr/local/bin/sticky-backend
+COPY --from=builder /out/sticky-initdb   /usr/local/bin/sticky-initdb
+
+ENV BACKEND_PORT=8080
+ENV OVERSEER_URL=ws://overseer:8080/ws
+ENV DB_DSN=""
+ENV JWT_SECRET=""
+ENV PG_ADMIN_USER=""
+ENV PG_ADMIN_PASSWORD=""
+ENV ADMIN_USERNAME=admin
+ENV ADMIN_PASSWORD=""
+
+EXPOSE 8080
+
+ENTRYPOINT ["sticky-backend"]

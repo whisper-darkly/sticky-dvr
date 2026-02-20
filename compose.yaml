@@ -1,17 +1,50 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: changeme-admin
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  db-init:
+    image: sticky-backend:latest
+    entrypoint: ["/usr/local/bin/sticky-initdb"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # App database connection (what the backend will use).
+      DB_DSN: postgres://sticky:changeme@postgres:5432/sticky?sslmode=disable
+
+      # Postgres superuser credentials — used ONLY by db-init to create
+      # the app DB and role on first run. Omit both to skip that step.
+      PG_ADMIN_USER: postgres
+      PG_ADMIN_PASSWORD: changeme-admin
+
   backend:
     image: sticky-backend:latest
     restart: unless-stopped
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
-    volumes:
-      - ./data:/data
     environment:
       BACKEND_PORT: 8080
-
-      # WebSocket address of the sticky-overseer container.
-      # Update the host/port to match your overseer deployment.
+      DB_DSN: postgres://sticky:changeme@postgres:5432/sticky?sslmode=disable
+      JWT_SECRET: change-me-in-production
       OVERSEER_URL: ws://overseer:8080/ws
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: change-me-on-first-run
 
-      # Directory for persisted channel configs and global config.
-      CONF_DIR: /data/conf
+volumes:
+  postgres_data:

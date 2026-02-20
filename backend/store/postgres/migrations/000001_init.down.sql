@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS worker_events;
+DROP TABLE IF EXISTS subscriptions;
+DROP TABLE IF EXISTS sources;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS config;

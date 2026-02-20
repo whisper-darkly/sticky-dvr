@@ -1,0 +1,8 @@
+# Phase 2 — sticky-frontend
+# Serves flat HTML/CSS/JS from NGINX.
+# Placeholder until frontend/ directory is populated.
+FROM nginx:1.27-alpine
+
+COPY frontend/ /usr/share/nginx/html/
+
+EXPOSE 80

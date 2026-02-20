@@ -1,22 +1,99 @@
-VERSION  := $(shell cat VERSION)
-COMMIT   := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-IMAGE    := sticky-backend
+VERSION := $(shell cat VERSION)
+COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
-.PHONY: build install image clean
+BACKEND_IMAGE  := sticky-backend
+FRONTEND_IMAGE := sticky-frontend
+PROXY_IMAGE    := sticky-proxy
 
-build:
-	go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o dist/sticky-backend .
+DIST := dist
 
-install:
-	go install -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" .
+.PHONY: all build-backend build-initdb build-all \
+        image-backend image-frontend image-proxy \
+        run-backend run-postgres run-all \
+        export-backend export-frontend export-proxy \
+        clean
 
-image:
+# ---- build ----
+
+all: build-all
+
+build-backend:
+	mkdir -p $(DIST)
+	cd backend && go build \
+		-ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" \
+		-o ../$(DIST)/sticky-backend \
+		.
+
+build-initdb:
+	mkdir -p $(DIST)
+	cd backend && go build \
+		-ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" \
+		-o ../$(DIST)/sticky-initdb \
+		./cmd/initdb/
+
+build-all: build-backend build-initdb
+
+# ---- docker images ----
+
+image-backend:
 	docker build \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg COMMIT=$(COMMIT) \
-		-t $(IMAGE):$(VERSION) \
-		-t $(IMAGE):latest \
+		-f Dockerfile.backend \
+		-t $(BACKEND_IMAGE):$(VERSION) \
+		-t $(BACKEND_IMAGE):latest \
 		.
 
+image-frontend:
+	docker build \
+		-f Dockerfile.frontend \
+		-t $(FRONTEND_IMAGE):$(VERSION) \
+		-t $(FRONTEND_IMAGE):latest \
+		.
+
+image-proxy:
+	docker build \
+		-f Dockerfile.proxy \
+		-t $(PROXY_IMAGE):$(VERSION) \
+		-t $(PROXY_IMAGE):latest \
+		.
+
+image-all: image-backend image-frontend image-proxy
+
+# ---- run (docker compose) ----
+
+run-postgres:
+	docker compose up -d postgres
+
+run-all:
+	docker compose up -d
+
+stop:
+	docker compose down
+
+logs:
+	docker compose logs -f backend
+
+# ---- export (save images to tar for airgapped deploy) ----
+
+export-backend:
+	mkdir -p $(DIST)
+	docker save $(BACKEND_IMAGE):$(VERSION) | gzip > $(DIST)/$(BACKEND_IMAGE)-$(VERSION).tar.gz
+	@echo "Saved $(DIST)/$(BACKEND_IMAGE)-$(VERSION).tar.gz"
+
+export-frontend:
+	mkdir -p $(DIST)
+	docker save $(FRONTEND_IMAGE):$(VERSION) | gzip > $(DIST)/$(FRONTEND_IMAGE)-$(VERSION).tar.gz
+	@echo "Saved $(DIST)/$(FRONTEND_IMAGE)-$(VERSION).tar.gz"
+
+export-proxy:
+	mkdir -p $(DIST)
+	docker save $(PROXY_IMAGE):$(VERSION) | gzip > $(DIST)/$(PROXY_IMAGE)-$(VERSION).tar.gz
+	@echo "Saved $(DIST)/$(PROXY_IMAGE)-$(VERSION).tar.gz"
+
+export-all: export-backend export-frontend export-proxy
+
+# ---- clean ----
+
 clean:
-	rm -rf dist/
+	rm -rf $(DIST)/sticky-backend $(DIST)/sticky-initdb
