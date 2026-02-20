@@ -1,0 +1,427 @@
+---
+title: Implement converter client for /api/sources/{driver}/{username}/files endpoint
+created: 2026-02-20
+origin: Backend stub implementation during Phase 1 completion, converter integration deferred to Phase 2
+priority: low
+complexity: medium
+notes:
+  - Completes Phase 1 API implementation without unimplemented handlers
+  - Follows existing overseer client pattern in codebase
+  - Graceful degradation if converter service unavailable
+  - Requires investigation of ../sticky-converter API contract
+  - Affects user-facing files list feature
+---
+
+Follow exactly and without stopping:
+
+## Task: Implement converter client for /api/sources/{driver}/{username}/files endpoint
+
+## Background & Context
+
+During Phase 1 completion of sticky-dvr backend, the GET /api/sources/{driver}/{username}/files endpoint was registered in the router but left as a stub. The comment in the code marks it: "Stub: converter integration is Phase 2." The handler currently returns an empty files array for every request:
+
+```go
+// backend/router/router.go line 417-426
+func getSourceFiles(d Deps) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Stub: converter integration is Phase 2.
+        driver, username := r.PathValue("driver"), r.PathValue("username")
+        writeJSON(w, http.StatusOK, map[string]any{
+            "driver":   driver,
+            "username": username,
+            "files":    []any{},
+        })
+    }
+}
+```
+
+The sticky-converter service (in the separate ../sticky-converter repository) handles video file conversion, archival, and provides an HTTP API for listing converted files. This task implements a client for that API so the backend can fetch real file listings and return them to users.
+
+The pattern for this already exists in the codebase: backend/overseer/client.go implements an HTTP client for sticky-overseer. The converter client will follow the same pattern.
+
+## Problem Description
+
+Current state:
+- GET /api/sources/{driver}/{username}/files always returns empty array
+- Users cannot see converted/archived files in the UI (Phase 2 frontend)
+- API is technically complete but not functional for files feature
+- No integration between backend and converter service
+
+Expected behavior:
+- GET /api/sources/{driver}/{username}/files queries converter service
+- Returns list of files with metadata (filename, size, created_at, duration, etc.)
+- If converter is unavailable, returns empty list (graceful degradation)
+- Admin users can view all sources' files
+- Regular users can view only their own subscriptions' files
+
+Missing pieces:
+1. HTTP client to call converter API
+2. FileInfo struct matching converter API response
+3. Integration of client into router dependencies
+4. Error handling for converter unreachability
+5. Environment variable for converter URL
+
+## Implementation Plan
+
+### Step 1: Investigate sticky-converter API
+
+Before implementing, examine the converter service API contract:
+
+1. Check: /home/mmulligan/Development/whisper-darkly-github/sticky-converter/ (relative to repo root)
+2. Look for:
+   - API documentation or README
+   - Example API responses
+   - Endpoint format for GET /files/{driver}/{username}
+   - FileInfo structure (fields: filename, size, duration, url, created_at, etc.)
+3. Determine:
+   - Response format (JSON structure)
+   - HTTP status codes (200 for success, 404 for not found, etc.)
+   - Base URL format (e.g., http://converter:8080/)
+4. Document findings in code comments
+
+If converter source unavailable, use reasonable assumptions:
+- Endpoint: GET {CONVERTER_URL}/files/{driver}/{username}
+- Response: `{"files": [{"filename": "file.mp4", "size": 1024000, "created_at": "2026-02-20T10:00:00Z", "url": "http://..."}, ...]}`
+- Errors: 404 if source not found, 500 for server errors
+- Timeouts: Use 5 second timeout
+
+### Step 2: Create backend/converter/client.go
+
+Create new file: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/backend/converter/client.go
+
+Structure:
+
+```go
+package converter
+
+import (
+    "context"
+    "encoding/json"
+    "fmt"
+    "io"
+    "net/http"
+    "time"
+)
+
+// Client provides HTTP access to sticky-converter service.
+type Client struct {
+    baseURL string
+    client  *http.Client
+}
+
+// FileInfo represents metadata about a converted/archived video file.
+type FileInfo struct {
+    Filename  string `json:"filename"`
+    Size      int64  `json:"size"`              // bytes
+    Duration  int64  `json:"duration"`          // seconds
+    CreatedAt string `json:"created_at"`        // RFC3339 timestamp
+    URL       string `json:"url"`               // download URL
+}
+
+// NewClient creates a new converter client.
+// baseURL example: http://converter:8080
+func NewClient(baseURL string) *Client {
+    if baseURL == "" {
+        baseURL = "http://converter:8080"
+    }
+    return &Client{
+        baseURL: baseURL,
+        client: &http.Client{
+            Timeout: 5 * time.Second,
+        },
+    }
+}
+
+// GetFiles retrieves the list of files for a given source.
+// Returns empty list if source has no files or converter is unavailable.
+func (c *Client) GetFiles(ctx context.Context, driver, username string) ([]FileInfo, error) {
+    if c == nil {
+        return []FileInfo{}, nil
+    }
+
+    // Build URL
+    url := fmt.Sprintf("%s/files/%s/%s", c.baseURL, driver, username)
+
+    // Create request with context
+    req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+    if err != nil {
+        // Error creating request: return empty, log warning
+        // Note: actual logging depends on logger available in backend
+        return []FileInfo{}, nil
+    }
+
+    // Execute request
+    resp, err := c.client.Do(req)
+    if err != nil {
+        // Network error or timeout: return empty gracefully
+        // In production, log this as warning
+        return []FileInfo{}, nil
+    }
+    defer resp.Body.Close()
+
+    // Handle non-200 responses
+    if resp.StatusCode != http.StatusOK {
+        // Not found or server error: return empty
+        if resp.StatusCode == http.StatusNotFound {
+            return []FileInfo{}, nil
+        }
+        // Other errors: return empty, but could log as warning
+        return []FileInfo{}, nil
+    }
+
+    // Parse response body
+    var respBody struct {
+        Files []FileInfo `json:"files"`
+    }
+
+    body, err := io.ReadAll(resp.Body)
+    if err != nil {
+        return []FileInfo{}, nil
+    }
+
+    if err := json.Unmarshal(body, &respBody); err != nil {
+        // JSON parse error: return empty
+        return []FileInfo{}, nil
+    }
+
+    return respBody.Files, nil
+}
+
+// IsAvailable checks if converter service is reachable.
+// Useful for health checks but not required for GetFiles (which fails gracefully).
+func (c *Client) IsAvailable(ctx context.Context) bool {
+    if c == nil {
+        return false
+    }
+
+    req, err := http.NewRequestWithContext(ctx, "HEAD", c.baseURL+"/health", nil)
+    if err != nil {
+        return false
+    }
+
+    resp, err := c.client.Do(req)
+    if err != nil {
+        return false
+    }
+    defer resp.Body.Close()
+
+    return resp.StatusCode == http.StatusOK
+}
+```
+
+Key decisions:
+- `GetFiles` returns empty slice on any error (graceful degradation)
+- No error return value (errors are silently handled)
+- HTTP client has 5-second timeout
+- Follows existing overseer client pattern
+
+### Step 3: Update backend/router/router.go
+
+Add ConverterClient to Deps struct and update handler:
+
+Find: `type Deps struct` (line 22)
+
+Change from:
+```go
+type Deps struct {
+    Store     store.Store
+    Manager   *manager.Manager
+    Config    *config.Global
+    JWTSecret []byte
+}
+```
+
+Change to:
+```go
+type Deps struct {
+    Store            store.Store
+    Manager          *manager.Manager
+    Config           *config.Global
+    JWTSecret        []byte
+    ConverterClient  *converter.Client
+}
+```
+
+Add import at top (line 13):
+```go
+"github.com/whisper-darkly/sticky-dvr/backend/converter"
+```
+
+Update getSourceFiles handler (line 417):
+
+From:
+```go
+func getSourceFiles(d Deps) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Stub: converter integration is Phase 2.
+        driver, username := r.PathValue("driver"), r.PathValue("username")
+        writeJSON(w, http.StatusOK, map[string]any{
+            "driver":   driver,
+            "username": username,
+            "files":    []any{},
+        })
+    }
+}
+```
+
+To:
+```go
+func getSourceFiles(d Deps) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        driver, username := r.PathValue("driver"), r.PathValue("username")
+        
+        files := []converter.FileInfo{}
+        if d.ConverterClient != nil {
+            var err error
+            files, err = d.ConverterClient.GetFiles(r.Context(), driver, username)
+            if err != nil {
+                files = []converter.FileInfo{}
+            }
+        }
+        
+        writeJSON(w, http.StatusOK, map[string]any{
+            "driver":   driver,
+            "username": username,
+            "files":    files,
+        })
+    }
+}
+```
+
+### Step 4: Update backend/main.go
+
+Add converter client initialization:
+
+Find: `func main()` (in backend/cmd/server/main.go or backend/main.go)
+
+Add CONVERTER_URL environment variable reading (example pattern from existing env calls):
+
+```go
+import (
+    // ... existing imports ...
+    "github.com/whisper-darkly/sticky-dvr/backend/converter"
+)
+
+func main() {
+    // ... existing setup ...
+
+    // Read converter URL from env
+    converterURL := os.Getenv("CONVERTER_URL")
+    if converterURL == "" {
+        converterURL = "http://converter:8080"
+    }
+    
+    // Create converter client
+    converterClient := converter.NewClient(converterURL)
+
+    // Create router with dependencies
+    deps := router.Deps{
+        Store:           db,
+        Manager:         mgr,
+        Config:          cfg,
+        JWTSecret:       []byte(jwtSecret),
+        ConverterClient: converterClient,
+    }
+
+    // ... rest of setup ...
+}
+```
+
+### Step 5: Update Dockerfile.backend
+
+Add CONVERTER_URL environment variable default:
+
+Find: `ENV` lines in Dockerfile.backend
+
+Add:
+```dockerfile
+ENV CONVERTER_URL=http://converter:8080
+```
+
+### Step 6: Update compose.yaml
+
+Add CONVERTER_URL to backend service environment:
+
+Find: backend service environment section (line 41-47)
+
+Add:
+```yaml
+CONVERTER_URL: http://converter:8080
+```
+
+Also add thumbnailer and converter services to compose (if not already present):
+
+```yaml
+services:
+  # ... existing postgres, db-init, backend services ...
+
+  converter:
+    image: sticky-converter:latest
+    restart: unless-stopped
+    # depends_on: (add what's needed)
+    # ports: (if exposed in sticky-converter)
+
+  thumbnailer:
+    image: sticky-thumbnailer:latest
+    restart: unless-stopped
+    # depends_on: (add what's needed)
+    # ports: (if exposed)
+
+  # ... other services ...
+```
+
+## Technical Requirements
+
+- Language: Go
+- Package: converter (new)
+- File: backend/converter/client.go
+- HTTP client with 5-second timeout
+- FileInfo struct for response marshaling
+- Graceful error handling (return empty list on any error)
+- No external dependencies (use stdlib net/http, encoding/json)
+- Environment variable: CONVERTER_URL (default: http://converter:8080)
+- Pattern: Follow existing overseer client implementation
+
+## Success Criteria
+
+1. backend/converter/client.go exists with Client, FileInfo, GetFiles, IsAvailable
+2. backend/router/router.go imports converter package and uses ConverterClient
+3. Deps struct includes ConverterClient field
+4. getSourceFiles handler calls d.ConverterClient.GetFiles instead of returning empty slice
+5. `make build-backend` compiles without errors
+6. Binary created at dist/sticky-backend
+7. With converter service running: GET /api/sources/driver/user/files returns actual files
+8. Without converter service: GET /api/sources/driver/user/files returns empty files array (no error)
+9. Environment variable CONVERTER_URL can override default
+10. Docker image builds with ENV CONVERTER_URL set
+
+## Expected Outcome
+
+After completing this task:
+- Backend can query converter for file listings
+- /api/sources/{driver}/{username}/files returns real data when converter is available
+- Graceful degradation if converter is unavailable (empty list instead of error)
+- Frontend (Phase 2) can display file lists to users
+- API is fully functional (no more stubs)
+
+## Reference Information
+
+- Backend router: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/backend/router/router.go
+- Overseer client reference: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/backend/overseer/client.go
+- Dockerfile.backend: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/Dockerfile.backend
+- compose.yaml: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/compose.yaml
+- Converter service: /home/mmulligan/Development/whisper-darkly-github/sticky-converter/ (investigate API)
+- Project documentation: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/CLAUDE.md
+
+## Notes & Warnings
+
+- IMPORTANT: Before implementing, investigate actual sticky-converter API endpoint and response format
+- Graceful degradation: all errors return empty list (no 500 errors from backend)
+- Test with and without converter running to verify failure handling
+- 5-second timeout prevents hanging if converter is slow or unavailable
+- Client can be nil safely (check `if d.ConverterClient != nil`)
+- No error return value from GetFiles keeps router handler simple
+- FileInfo struct must be exported (capitalized) for JSON marshaling
+- Context passing allows request cancellation to propagate
+- Remember to add import statement for converter package in router.go
+- Test endpoint: `curl http://localhost:8080/api/sources/chaturbate/testuser/files` should return files or empty array

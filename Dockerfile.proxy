@@ -1,6 +1,29 @@
-# Phase 2 — sticky-proxy
-# NGINX reverse-proxy with JWT validation (Lua/NJS plugin).
-# Placeholder until proxy config is implemented.
 FROM nginx:1.27-alpine
+
+# Install the NGINX NJS module for JavaScript-based JWT validation.
+RUN apk add --no-cache nginx-mod-http-js
+
+# Load the NJS dynamic module.
+RUN printf 'load_module modules/ngx_http_js_module.so;\n' \
+    > /etc/nginx/modules/njs.conf
+
+# NJS script directory
+RUN mkdir -p /etc/nginx/njs
+
+# Copy proxy config and JWT validation script
+COPY proxy/proxy.conf /etc/nginx/conf.d/default.conf
+COPY proxy/jwt-validate.js /etc/nginx/njs/jwt-validate.js
+
+# Remove the default nginx config that conflicts with ours
+RUN rm -f /etc/nginx/conf.d/default.conf.bak 2>/dev/null || true
+
+# TLS certs expected at /etc/nginx/certs/ (mount via Docker volume or secret)
+# For development, self-signed certs can be generated with:
+#   openssl req -x509 -newkey rsa:4096 -nodes -days 365 \
+#     -keyout tls.key -out tls.crt -subj '/CN=localhost'
+RUN mkdir -p /etc/nginx/certs
+
+# JWT_SECRET must be passed at runtime (same value as backend JWT_SECRET)
+ENV JWT_SECRET=""
 
 EXPOSE 80 443

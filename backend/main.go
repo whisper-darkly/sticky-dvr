@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/whisper-darkly/sticky-dvr/backend/config"
+	"github.com/whisper-darkly/sticky-dvr/backend/converter"
 	"github.com/whisper-darkly/sticky-dvr/backend/manager"
 	"github.com/whisper-darkly/sticky-dvr/backend/overseer"
 	"github.com/whisper-darkly/sticky-dvr/backend/router"
@@ -80,6 +81,15 @@ func main() {
 		log.Fatalf("manager: %v", err)
 	}
 
+	// Converter client (optional — graceful degradation if CONVERTER_URL not set).
+	var convClient *converter.Client
+	if converterURL := os.Getenv("CONVERTER_URL"); converterURL != "" {
+		convClient = converter.NewClient(converterURL)
+		log.Printf("converter client: %s", converterURL)
+	} else {
+		log.Println("CONVERTER_URL not set; /files endpoint will return empty list")
+	}
+
 	// Periodically delete expired sessions (every hour).
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
@@ -94,10 +104,11 @@ func main() {
 	srv := &http.Server{
 		Addr: ":" + port,
 		Handler: router.New(router.Deps{
-			Store:     db,
-			Manager:   mgr,
-			Config:    cfg,
-			JWTSecret: []byte(jwtSecret),
+			Store:           db,
+			Manager:         mgr,
+			Config:          cfg,
+			JWTSecret:       []byte(jwtSecret),
+			ConverterClient: convClient,
 		}),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,

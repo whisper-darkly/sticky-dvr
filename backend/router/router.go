@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/whisper-darkly/sticky-dvr/backend/auth"
 	"github.com/whisper-darkly/sticky-dvr/backend/config"
+	"github.com/whisper-darkly/sticky-dvr/backend/converter"
 	"github.com/whisper-darkly/sticky-dvr/backend/manager"
 	"github.com/whisper-darkly/sticky-dvr/backend/middleware"
 	"github.com/whisper-darkly/sticky-dvr/backend/store"
@@ -20,10 +21,11 @@ const sessionTTL = 24 * time.Hour
 
 // Deps holds all dependencies for the router.
 type Deps struct {
-	Store     store.Store
-	Manager   *manager.Manager
-	Config    *config.Global
-	JWTSecret []byte
+	Store           store.Store
+	Manager         *manager.Manager
+	Config          *config.Global
+	JWTSecret       []byte
+	ConverterClient *converter.Client // nil → files endpoint returns empty list
 }
 
 // New builds and returns the application HTTP handler.
@@ -146,8 +148,8 @@ func login(d Deps) http.HandlerFunc {
 
 		setRefreshCookie(w, refreshTok)
 		writeJSON(w, http.StatusOK, map[string]any{
-			"token": token,
-			"user":  u,
+			"access_token": token,
+			"user":         u,
 		})
 	}
 }
@@ -197,7 +199,7 @@ func refreshToken(d Deps) http.HandlerFunc {
 		}
 
 		setRefreshCookie(w, newRefreshTok)
-		writeJSON(w, http.StatusOK, map[string]any{"token": token})
+		writeJSON(w, http.StatusOK, map[string]any{"access_token": token})
 	}
 }
 
@@ -416,12 +418,20 @@ func getSourceLogs(d Deps) http.HandlerFunc {
 
 func getSourceFiles(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Stub: converter integration is Phase 2.
 		driver, username := r.PathValue("driver"), r.PathValue("username")
+		if d.ConverterClient == nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"driver": driver, "username": username, "files": []any{},
+			})
+			return
+		}
+		files, err := d.ConverterClient.GetFiles(r.Context(), driver, username)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "converter error: "+err.Error())
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"driver":   driver,
-			"username": username,
-			"files":    []any{},
+			"driver": driver, "username": username, "files": files,
 		})
 	}
 }

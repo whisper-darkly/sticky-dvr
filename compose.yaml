@@ -36,15 +36,38 @@ services:
     depends_on:
       db-init:
         condition: service_completed_successfully
-    ports:
-      - "8080:8080"
+    # Port 8080 not exposed directly; traffic comes through sticky-proxy.
+    # Uncomment for development without proxy:
+    # ports:
+    #   - "8080:8080"
     environment:
       BACKEND_PORT: 8080
       DB_DSN: postgres://sticky:changeme@postgres:5432/sticky?sslmode=disable
       JWT_SECRET: change-me-in-production
       OVERSEER_URL: ws://overseer:8080/ws
       ADMIN_USERNAME: admin
-      ADMIN_PASSWORD: change-me-on-first-run
+      ADMIN_PASSWORD: admin  # Change this for production deployments
+
+  frontend:
+    image: sticky-frontend:latest
+    restart: unless-stopped
+
+  proxy:
+    image: sticky-proxy:latest
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      JWT_SECRET: change-me-in-production  # Must match backend JWT_SECRET
+    volumes:
+      # Mount TLS certificates.  Generate self-signed for dev:
+      #   openssl req -x509 -newkey rsa:4096 -nodes -days 365 \
+      #     -keyout certs/tls.key -out certs/tls.crt -subj '/CN=localhost'
+      - ./certs:/etc/nginx/certs:ro
 
 volumes:
   postgres_data:

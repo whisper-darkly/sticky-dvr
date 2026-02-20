@@ -1,0 +1,123 @@
+---
+title: Add .gitignore for build artifacts and local dev files
+created: 2026-02-20
+origin: Build artifacts (dist/) showing as untracked in git status during development
+priority: low
+complexity: low
+notes:
+  - Eliminates noise in git status output
+  - Prevents accidental binary commits
+  - Follows standard Go project conventions
+  - Should be done before more artifacts accumulate
+---
+
+Follow exactly and without stopping:
+
+## Task: Add .gitignore for build artifacts and local dev files
+
+## Background & Context
+
+The sticky-dvr repository currently has no .gitignore file. During Phase 1 development, the `make build-backend` command creates a dist/ directory containing compiled binaries (sticky-backend and sticky-initdb). Every time a developer runs `git status`, this dist/ directory appears as untracked, cluttering the output and creating noise that makes legitimate untracked files less visible.
+
+Additionally, as development continues, other common artifacts accumulate:
+- Go test binaries and coverage reports
+- Editor/IDE configuration directories
+- Operating system files (macOS .DS_Store, Windows Thumbs.db)
+- Environment configuration files (.env, .env.local)
+
+Without a .gitignore file, developers might accidentally commit these artifacts or miss warning signs when other actual code changes need attention. This is a standard hygiene issue for any Git-tracked project.
+
+## Problem Description
+
+Current behavior when running `git status`:
+```
+?? dist/
+```
+
+The dist/ directory is listed as untracked alongside any actual code changes. This creates visual clutter and increases the likelihood of:
+1. Accidental binary commits if developers are not careful
+2. Noise that obscures real untracked files needing version control decisions
+3. Larger repository size if binaries somehow get committed
+4. Unnecessary diffs when developers move between machines or clean/rebuild
+
+Expected behavior after fix:
+```
+git status
+# On branch main
+# nothing to commit, working tree clean
+```
+
+The dist/ directory should be automatically ignored by Git, allowing developers to focus on actual code changes and meaningful untracked content.
+
+## Implementation Plan
+
+1. Create file: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/.gitignore
+2. Add the following content (complete file):
+   ```
+   # Build output
+   dist/
+
+   # Go test cache and coverage
+   *.test
+   *.out
+   coverage.html
+
+   # Editor/IDE files
+   .idea/
+   .vscode/
+   *.swp
+   *.swo
+
+   # OS files
+   .DS_Store
+   Thumbs.db
+
+   # Environment files
+   .env
+   .env.local
+   ```
+3. Save the file
+4. Verify: Run `git status` and confirm dist/ no longer appears in untracked files
+5. Optionally verify with: `git check-ignore -v dist/sticky-backend` (should output that path is ignored)
+
+## Technical Requirements
+
+- File to create: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/.gitignore
+- Location: Repository root, same level as Makefile, CLAUDE.md, compose.yaml
+- Format: Standard gitignore format (# for comments, one pattern per line, / for directory suffix)
+- Patterns required: dist/, *.test, *.out, coverage.html, .idea/, .vscode/, *.swp, *.swo, .DS_Store, Thumbs.db, .env, .env.local
+
+## Success Criteria
+
+1. File .gitignore exists at /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/.gitignore
+2. File contains all documented patterns
+3. Running `git status` no longer shows `?? dist/` as untracked
+4. Running `git ls-files | grep dist` returns no results (dist/ is excluded from index)
+5. The file is itself tracked by Git (appears as new file in next commit)
+6. Running `git check-ignore -v dist/sticky-backend` confirms the path is ignored
+
+## Expected Outcome
+
+After this fix:
+- Build artifacts no longer clutter git status output
+- Developers cannot accidentally commit binary files from dist/
+- Repository hygiene improved for collaborative development
+- Standard Go project conventions followed
+- Future Phase 2 development (frontend, proxy) will benefit from clean git status
+
+## Reference Information
+
+- File to create: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/.gitignore
+- Standard Go gitignore reference: https://github.com/github/gitignore/blob/main/Go.gitignore
+- Related build command: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/Makefile (build-backend target)
+- Repository root: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/
+
+## Notes & Warnings
+
+- This is a low-priority housekeeping task but should be done early to establish clean development practices
+- Do not exclude legitimate code directories (backend/, frontend/, scripts/ should NOT be ignored)
+- Only ignore generated/temporary files and build artifacts
+- The .gitignore file itself should be committed to Git (not ignored)
+- Use forward slashes (/) for directory patterns to ensure cross-platform compatibility
+- Comments in gitignore start with # and are for documentation
+- Can verify ignoring is working by checking git index: `git ls-files --others --ignored --exclude-standard`

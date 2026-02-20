@@ -1,0 +1,370 @@
+---
+title: Implement sticky-frontend SPA (Phase 2)
+created: 2026-02-20
+origin: Phase 1 completion left frontend as stub; required for complete system functionality
+priority: medium
+complexity: high
+notes:
+  - Vanilla JS only, no framework, no build step
+  - 7 pages to implement with specific functionality
+  - Must follow OAuth2 auth flow and polling architecture
+  - NGINX config required for SPA routing
+  - Estimated effort: significant (multiple pages with CRUD operations)
+---
+
+Follow exactly and without stopping:
+
+## Task: Implement sticky-frontend SPA (Phase 2)
+
+## Background & Context
+
+sticky-dvr is a three-component system shipped from one repository:
+1. **sticky-backend** (Phase 1 ✓) — Complete REST API with PostgreSQL
+2. **sticky-frontend** (Phase 2 — THIS TASK) — Flat HTML/CSS/JS SPA, currently a stub
+3. **sticky-proxy** (Phase 2) — NGINX reverse proxy with JWT validation
+
+The backend API is fully functional and documented in CLAUDE.md. The frontend currently consists of an empty directory with a .gitkeep file. The system is not usable without a UI layer. This task implements the complete frontend SPA as a flat HTML/CSS/JS application with no build step, no framework, and no SSR.
+
+Frontend serves as the primary user interface for:
+- Regular users: viewing and managing their subscriptions
+- Admins: managing users, viewing system config, monitoring all sources
+- All users: authentication and session management
+
+The frontend communicates with the backend API through the proxy (Phase 2 task) which adds JWT validation and TLS termination. Direct backend communication is also supported for development/testing.
+
+## Problem Description
+
+Current state:
+- frontend/ directory contains only .gitkeep placeholder
+- Dockerfile.frontend is a stub (just copies empty frontend/ to nginx container)
+- No pages implemented, no routing, no API integration
+- Operators have no way to interact with the system
+
+Missing functionality:
+- Login UI and authentication flow
+- Dashboard showing current recording status
+- Subscription CRUD operations with posture controls
+- Admin interfaces for config and user management
+- Source detail pages with logs and files
+- Session management and JWT refresh
+
+Users cannot:
+1. Log in to the system
+2. View their subscriptions
+3. Subscribe to new sources
+4. Manage recording posture (pause/resume/archive)
+5. View system status or logs
+6. Manage system configuration (admin only)
+7. Manage users (admin only)
+
+## Implementation Plan
+
+### Page Structure (7 pages total)
+
+#### 1. /login — Authentication Page
+
+Functionality:
+- HTML form with username/password fields
+- POST to /api/auth/login with credentials
+- Extract access_token from response
+- Store in sessionStorage (accessible only in HTTPS/proxy context)
+- Handle login errors (401) with user-friendly message
+- Redirect to / on success
+- Disable login button during request to prevent double-submit
+
+Technical details:
+- Response field: "access_token" (fixed in Job 1)
+- Store as: sessionStorage.getItem('access_token')
+- Also store: user object (id, username, role)
+- Header: `Authorization: Bearer {token}`
+- On 401: Show "Invalid username or password"
+- On error: Show network/server error message
+
+#### 2. / — Dashboard (main page)
+
+Functionality:
+- Display list of user's active subscriptions
+- Show recording status for each (polling /api/subscriptions every ~5 seconds)
+- Display badges for posture (active/paused/archived) and state (recording/idle/error)
+- Quick action buttons: pause, resume, archive, delete
+- Add new subscription link
+- Show last updated timestamp
+- If admin: "Admin" link to /admin/config
+
+Technical details:
+- Poll /api/subscriptions with `setInterval(fetch, 5000)`
+- Parse response and render subscription list
+- State badges: different colors for recording (green), idle (gray), error (red)
+- Posture badges: active (blue), paused (yellow), archived (striped)
+- POST to /api/subscriptions/{driver}/{username}/pause etc.
+- DELETE /api/subscriptions/{driver}/{username}
+- Handle 401 (redirect to /login if token expired)
+- POST /api/auth/refresh on 401 to get new token and retry
+
+#### 3. /subscriptions — Subscription List Page
+
+Functionality:
+- Full list of user's subscriptions with detailed view
+- Display all subscription details: driver, username, posture, state
+- CRUD operations: Create, Read, Update (posture), Delete
+- Posture control buttons: Pause, Resume, Archive
+- Add new subscription form (dropdown for driver, text input for username)
+- Error state management with reset-error button
+- Delete confirmation dialog
+
+Technical details:
+- GET /api/subscriptions (same as dashboard but dedicated page with more detail)
+- POST /api/subscriptions {driver, username} to create
+- POST /api/subscriptions/{driver}/{username}/pause
+- POST /api/subscriptions/{driver}/{username}/resume
+- POST /api/subscriptions/{driver}/{username}/archive
+- DELETE /api/subscriptions/{driver}/{username}
+- POST /api/subscriptions/{driver}/{username}/reset-error
+- Show form validation (driver required, username required)
+- Drivers list: hardcoded from CLAUDE.md (chaturbate, stripchat, etc.)
+- Confirmation for destructive actions
+
+#### 4. /source/{driver}/{username} — Source Detail Page
+
+Functionality:
+- Deep view of a single source across all users (admin only) or user's source
+- Display current posture and state
+- Show recent worker events (started, exited, stopped)
+- Display server logs (last N lines)
+- Show converted files list with download links
+- Display source metadata and history
+
+Technical details:
+- GET /api/sources/{driver}/{username}/events (admin: all; user: own only)
+- GET /api/sources/{driver}/{username}/logs (admin: all; user: own only)
+- GET /api/sources/{driver}/{username}/files (admin: all; user: own only)
+- Render events as timeline/list (timestamp, pid, event_type, exit_code)
+- Render logs as scrollable text area or pre block
+- Render files as table (filename, size, created_at, download link if url provided)
+- Refresh button to poll latest data
+- Back button to return to subscriptions/dashboard
+
+#### 5. /admin/config — Global Configuration Page (admin only)
+
+Functionality:
+- View and edit global system configuration
+- Display config as form fields (read from backend config schema)
+- Save button to POST changes
+- Success/error messages on save
+- Redirect to /login if not admin role
+- Read-only view if no PUT permission
+
+Technical details:
+- GET /api/config (returns global configuration object)
+- PUT /api/config {config: updated fields}
+- Render form fields based on returned config structure (parse JSON)
+- Fields likely include: max_concurrent_workers, error_threshold, cleanup_interval, etc.
+- Show "Admin only" message if user.role != "admin"
+- Disable/enable form based on response or role
+
+#### 6. /admin/users — User Management Page (admin only)
+
+Functionality:
+- List all users in system
+- Create new user (username, password, role)
+- Edit user (username, password, role)
+- Delete user with confirmation
+- Redirect to /login if not admin role
+
+Technical details:
+- GET /api/users (list all users)
+- POST /api/users {username, password, role}
+- GET /api/users/{id} (get single user)
+- PUT /api/users/{id} {username, password, role}
+- DELETE /api/users/{id}
+- Render as table with username, role columns and action buttons
+- Edit form: populate existing values, allow changing password and role
+- Create form: username, password, role dropdown
+- Roles: "admin" or "user"
+- Show admin-only message if role != "admin"
+
+#### 7. /admin/sources — All Sources Page (admin only)
+
+Functionality:
+- Display all sources across all users (admin only)
+- Show driver, username, associated user, posture, state
+- Link to source detail page (/source/{driver}/{username})
+- Redirect to /login if not admin role
+
+Technical details:
+- No dedicated API endpoint; build from /api/subscriptions (admin sees all)
+- Parse subscription list and group by source
+- Display driver, username, user who subscribed, posture, state
+- Click to go to source detail page
+- Sortable by driver, username, user
+
+### HTML Structure
+
+Frontend directory structure:
+```
+frontend/
+  index.html           — Main SPA entry point with routing logic
+  css/
+    style.css          — All styling (responsive, light/dark-friendly)
+  js/
+    main.js            — Router, global state, auth handling
+    api.js             — API client wrapper (baseURL, auth headers, refresh logic)
+    pages/
+      login.js         — Login page render and logic
+      dashboard.js     — Dashboard page render and logic
+      subscriptions.js — Subscriptions page render and logic
+      source-detail.js — Source detail page render and logic
+      admin-config.js  — Admin config page render and logic
+      admin-users.js   — Admin users page render and logic
+      admin-sources.js — Admin sources page render and logic
+    utils.js           — Shared utilities (localStorage, format, etc.)
+```
+
+### Routing Implementation
+
+Vanilla JS SPA routing (no framework):
+
+1. URL hash-based routing: `/#/path` maps to page
+2. Window.onhashchange listener detects route changes
+3. Route table maps hash to page renderer function
+4. Main render function:
+   ```javascript
+   const routes = {
+     '/login': renderLoginPage,
+     '/': renderDashboard,
+     '/subscriptions': renderSubscriptions,
+     '/source': renderSourceDetail,
+     '/admin/config': renderAdminConfig,
+     '/admin/users': renderAdminUsers,
+     '/admin/sources': renderAdminSources,
+   };
+   ```
+5. Auth guard: redirect unauthenticated users to /login
+6. Admin guard: redirect non-admin users away from /admin/* pages
+
+### Authentication Flow
+
+1. User enters credentials on /login
+2. POST /api/auth/login {username, password}
+3. Extract access_token from response: response.access_token
+4. Store in sessionStorage: sessionStorage.setItem('access_token', token)
+5. Store user info: sessionStorage.setItem('user', JSON.stringify(user))
+6. Redirect to /
+7. On API request: Add header `Authorization: Bearer ${access_token}`
+8. If 401: Call POST /api/auth/refresh to get new token
+9. Retry original request with new token
+10. If refresh fails: Clear storage, redirect to /login
+
+### Styling Requirements
+
+- Responsive design (mobile-first, works on phone/tablet/desktop)
+- No external CSS dependencies (no Bootstrap, no Tailwind)
+- Light theme by default
+- Clear navigation
+- Status badges with distinct colors:
+  - Recording: green
+  - Idle: gray
+  - Error: red
+- Posture indicators:
+  - Active: blue, filled
+  - Paused: yellow, outlined
+  - Archived: striped or faded
+- Tables with sortable columns (JavaScript sort, no libraries)
+- Forms with validation and error display
+- Modal dialogs for confirmations
+- Accessible color contrast ratios (WCAG AA minimum)
+
+### Dockerfile.frontend Update
+
+Current stub:
+```dockerfile
+FROM nginx:1.27-alpine
+COPY frontend /usr/share/nginx/html
+EXPOSE 80
+```
+
+Required changes:
+1. Add NGINX config with SPA routing: `try_files $uri $uri/ /index.html`
+2. Example config snippet:
+   ```nginx
+   server {
+       listen 80;
+       server_name _;
+       root /usr/share/nginx/html;
+       index index.html;
+       
+       location / {
+           try_files $uri $uri/ /index.html;
+       }
+   }
+   ```
+3. Or embed config in Dockerfile or mount as volume
+
+## Technical Requirements
+
+- Language: JavaScript (ES6+, no transpilation needed in modern browsers)
+- Framework: None (vanilla JS only)
+- Build step: None (serve .html, .js, .css directly)
+- Polyfills: Not needed (assuming modern browser support)
+- HTTP requests: Fetch API (native browser)
+- Storage: sessionStorage for tokens (clears on browser close)
+- Routing: Hash-based (#/path or /#/path)
+- HTTPS: Required for secure cookie handling (HttpOnly refresh tokens)
+- NGINX config: try_files for SPA routing
+
+Backend API base URL:
+- Relative path: /api/ (proxy serves frontend and proxies /api to backend)
+- Or environment: REACT_APP_API_URL (for development, hardcoded in frontend)
+
+## Success Criteria
+
+1. All 7 pages render correctly
+2. Login page: POST /api/auth/login works, token is extracted and stored
+3. Dashboard: subscriptions list fetches and displays every 5 seconds
+4. Subscriptions: CRUD operations (create, read, update posture, delete) all work
+5. Source detail: events, logs, files display correctly
+6. Admin pages: only accessible to admin users, redirect for non-admin
+7. Auth refresh: 401 triggers token refresh and retry
+8. Navigation: Links between pages work, back button works
+9. Styling: Responsive layout, readable on mobile/tablet/desktop
+10. `make image-frontend` builds successfully
+11. Starting container with `docker run -p 80:80 sticky-frontend` serves pages on http://localhost/
+12. SPA routing works: navigating to /#/subscriptions displays subscriptions page
+13. No console errors when running typical workflow (login → dashboard → subscribe)
+
+## Expected Outcome
+
+After completing this task:
+- Users can log in and see their subscriptions
+- Users can manage subscription posture (pause/resume/archive)
+- Users can add and delete subscriptions
+- Admins can view system configuration and manage users
+- Admins can view all sources and monitor activity
+- Frontend is production-ready as a flat HTML/CSS/JS SPA
+- make image-frontend builds a deployable Docker image
+- System is feature-complete for Phase 1-2 scope
+
+## Reference Information
+
+Backend API contract: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/CLAUDE.md (API Surface section)
+Authentication spec: CLAUDE.md (Authentication & Authorization section)
+Current backend router: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/backend/router/router.go
+Test API script reference: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/scripts/test-api.sh (API endpoint patterns)
+Frontend directory: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/frontend/
+Dockerfile.frontend: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/Dockerfile.frontend
+Makefile target: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/Makefile (line 47-52)
+Compose config: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/compose.yaml (frontend service to add)
+
+## Notes & Warnings
+
+- IMPORTANT: This is a large task (7 pages × multiple features). Consider breaking into parallel work streams if possible
+- No framework means more boilerplate but simpler deployment and no build step required
+- Fetch API errors should be user-friendly, not raw error objects
+- Always validate form inputs before sending to backend
+- Handle network timeouts gracefully (show user-friendly error message)
+- Don't expose JWT token in console.log (for security)
+- sessionStorage is cleared when browser tab closes (acceptable for development; proxy adds HttpOnly cookie for refresh)
+- SPA uses hash routing (#/) which works without server configuration, but proxy deployment uses history API (Phase 2 proxy task handles routing)
+- Test with actual backend using test-api.sh to ensure compatibility
+- Responsive design essential: test on multiple screen sizes before completion
+- Accessibility important: ensure keyboard navigation works, color-blind friendly

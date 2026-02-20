@@ -1,0 +1,540 @@
+---
+title: Implement sticky-proxy: NGINX with JWT validation (Phase 2)
+created: 2026-02-20
+origin: Phase 1 completion left proxy as stub; required for production deployment and security
+priority: medium
+complexity: high
+notes:
+  - Security-critical component: JWT validation is essential
+  - NGINX NJS module enables JavaScript-based JWT validation
+  - Reverse proxy must handle TLS termination and path-based routing
+  - Token refresh flow must be seamless for frontend
+  - Replaces direct backend exposure with secure proxy layer
+---
+
+Follow exactly and without stopping:
+
+## Task: Implement sticky-proxy: NGINX with JWT validation (Phase 2)
+
+## Background & Context
+
+sticky-dvr architecture requires a reverse proxy as the only public-facing entry point. The proxy is responsible for:
+
+1. **TLS Termination** — HTTPS entry point for clients
+2. **JWT Validation** — Verify JWTs before forwarding to backend
+3. **Header Injection** — Add X-User-Id and X-User-Role headers for backend to trust
+4. **Static Content** — Serve frontend HTML/CSS/JS directly
+5. **Path Routing** — Route /api/* to backend, /thumbnails/* to thumbnailer, / to frontend
+6. **Auth Bypass** — Allow unauthenticated access to /api/auth/login, /api/auth/refresh, /thumbnails/*
+
+Current state:
+- Dockerfile.proxy is a stub (just FROM nginx:1.27-alpine with EXPOSE 80 443)
+- No NGINX config exists
+- No JWT validation plugin implemented
+- Backend directly exposes port 8080 (security risk)
+- Frontend not served through proxy
+
+Required for production:
+- HTTPS/TLS termination
+- JWT signature validation (HS256)
+- Request header manipulation
+- Static file serving
+- Graceful fallback for invalid tokens
+
+## Problem Description
+
+Without the proxy, the system has these security and usability problems:
+
+1. Backend is directly exposed on port 8080 (no TLS, no proxy layer)
+2. Backend must trust X-User-Id and X-User-Role headers (vulnerable if backend is exposed)
+3. No central auth enforcement (every backend handler must verify JWT)
+4. Frontend cannot be served with API (separate services, CORS issues)
+5. No TLS termination (plaintext HTTP in production)
+6. Token refresh logic scattered across frontend and backend
+
+With the proxy:
+- Single entry point for all services
+- JWT validated at proxy layer (backend trusts headers from proxy only)
+- Frontend and backend served from same origin (no CORS)
+- TLS termination in proxy (backend runs plaintext internally, only proxy exposed)
+- Uniform auth enforcement across all protected endpoints
+
+## Implementation Plan
+
+### Step 1: Create NGINX Configuration Files
+
+#### File 1: Create nginx/proxy.conf
+
+Location: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/nginx/proxy.conf
+
+Contents (NGINX configuration):
+```nginx
+# NGINX proxy configuration for sticky-dvr
+# Validates JWT tokens using njs module
+# Routes requests to backend API, frontend SPA, and thumbnailer
+
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    client_max_body_size 20M;
+
+    # Load njs module for JWT validation
+    load_module modules/ngx_http_js_module.so;
+
+    # Include JWT validation script
+    js_path /etc/nginx/;
+    js_import jwt from jwt-validate.js;
+
+    # Upstream definitions
+    upstream backend {
+        server backend:8080;
+    }
+
+    upstream frontend_svc {
+        server frontend:80;
+    }
+
+    upstream thumbnailer {
+        server thumbnailer:8080;
+    }
+
+    # HTTP → HTTPS redirect
+    server {
+        listen 80 default_server;
+        server_name _;
+        
+        # Allow well-known for ACME (Let's Encrypt)
+        location /.well-known/acme-challenge/ {
+            root /usr/share/nginx/html;
+        }
+
+        # Redirect everything else to HTTPS
+        location / {
+            return 301 https://$host$request_uri;
+        }
+    }
+
+    # HTTPS server
+    server {
+        listen 443 ssl http2 default_server;
+        server_name _;
+
+        # TLS certificates (mount via volume or use init script)
+        # Example with self-signed for development:
+        ssl_certificate /etc/nginx/ssl/cert.pem;
+        ssl_certificate_key /etc/nginx/ssl/key.pem;
+
+        # TLS hardening
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+        ssl_prefer_server_ciphers on;
+
+        # HSTS header
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+        # Root for serving static files
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # ---- Public endpoints (no auth required) ----
+
+        # Login endpoint (no auth)
+        location = /api/auth/login {
+            proxy_pass http://backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Refresh token endpoint (no auth required, uses HttpOnly cookie)
+        location = /api/auth/refresh {
+            proxy_pass http://backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_cookie_path / /;  # Ensure cookies work
+        }
+
+        # Health check (no auth)
+        location = /api/health {
+            proxy_pass http://backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+
+        # Thumbnails (no auth, direct proxy to thumbnailer)
+        location /thumbnails/ {
+            proxy_pass http://thumbnailer/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_cache_valid 200 30d;  # Cache thumbnails for 30 days
+        }
+
+        # ---- Protected API endpoints (JWT required) ----
+
+        location /api/ {
+            # JWT validation
+            js_content jwt.validateAndForward;
+        }
+
+        # ---- Frontend SPA (no auth, SPA routing via try_files) ----
+
+        location / {
+            # Try file, then directory, then index.html for SPA routing
+            try_files $uri $uri/ /index.html;
+            
+            # Don't cache index.html (cache assets with hash)
+            if ($request_filename ~* ^.*?\.html?$) {
+                add_header Cache-Control "public, max-age=0";
+            }
+        }
+
+        # ---- Default error handling ----
+
+        error_page 404 /index.html;
+        error_page 403 =401 /api/unauthorized;
+    }
+}
+```
+
+#### File 2: Create nginx/jwt-validate.js
+
+Location: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/nginx/jwt-validate.js
+
+This file implements JWT validation using NGINX NJS (JavaScript):
+
+```javascript
+// JWT validation module for NGINX NJS
+// Validates HS256 JWTs and forwards authenticated requests to backend
+
+import * as crypto from "crypto";
+
+// Environment variable for JWT secret (set in container)
+let jwtSecret = process.env.JWT_SECRET || "";
+
+export default { validateAndForward };
+
+function validateAndForward(r) {
+    // Extract Authorization header
+    const authHeader = r.headersIn["authorization"];
+    
+    if (!authHeader) {
+        // No auth header: check if endpoint allows anonymous access
+        if (r.uri === "/api/auth/login" || r.uri === "/api/auth/refresh") {
+            // These endpoints can be accessed without token
+            forwardRequest(r, null);
+        } else {
+            // Protected endpoint without auth: 401
+            redirectToLogin(r);
+        }
+        return;
+    }
+
+    // Parse "Bearer {token}" format
+    const parts = authHeader.split(" ");
+    if (parts.length !== 2 || parts[0] !== "Bearer") {
+        redirectToLogin(r);
+        return;
+    }
+
+    const token = parts[1];
+
+    // Validate JWT signature
+    const payload = validateJWT(token, jwtSecret);
+    if (!payload) {
+        redirectToLogin(r);
+        return;
+    }
+
+    // Check token expiration
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+        redirectToLogin(r);
+        return;
+    }
+
+    // Token valid: forward with headers
+    forwardRequest(r, payload);
+}
+
+function validateJWT(token, secret) {
+    try {
+        // JWT format: header.payload.signature
+        const parts = token.split(".");
+        if (parts.length !== 3) {
+            return null;
+        }
+
+        const [headerB64, payloadB64, signatureB64] = parts;
+
+        // Decode payload (base64url)
+        const payload = JSON.parse(base64urlDecode(payloadB64));
+
+        // Reconstruct signature and verify
+        const message = headerB64 + "." + payloadB64;
+        const expectedSignature = hmacSha256(message, secret);
+
+        if (signatureB64 !== expectedSignature) {
+            return null;
+        }
+
+        return payload;
+    } catch (e) {
+        ngx.log(ngx.ERR, "JWT validation error: " + e.message);
+        return null;
+    }
+}
+
+function forwardRequest(r, payload) {
+    // Set headers for backend
+    if (payload) {
+        r.headersOut["X-User-Id"] = String(payload.sub);
+        r.headersOut["X-User-Role"] = payload.role || "user";
+        r.headersOut["X-Session-Id"] = payload.session_id || "";
+    }
+
+    // Forward to backend
+    r.subrequest("/api_proxy" + r.uri, {
+        method: r.method,
+        body: r.requestBody,
+        args: r.args,
+    }, function (reply) {
+        r.headersOut["Content-Type"] = reply.headersOut["content-type"];
+        r.sendHeader();
+        r.send(reply.body);
+        r.finish();
+    });
+}
+
+function redirectToLogin(r) {
+    r.status = 403;
+    r.headersOut["X-Redirect-To"] = "/login";
+    r.headersOut["Content-Type"] = "application/json";
+    r.send(JSON.stringify({
+        error: "Unauthorized",
+        redirect: "/login"
+    }));
+}
+
+function hmacSha256(message, secret) {
+    // HMAC-SHA256 and base64url encode
+    const hmac = crypto.createHmac("sha256", secret);
+    hmac.update(message);
+    const digest = hmac.digest("base64");
+    return base64urlEncode(digest);
+}
+
+function base64urlEncode(str) {
+    return str
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=/g, "");
+}
+
+function base64urlDecode(str) {
+    // Add padding
+    str += "==".substring(0, (4 - (str.length % 4)) % 4);
+    return Buffer.from(str.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString();
+}
+```
+
+**IMPORTANT NOTE**: NJS module has limited crypto support. This implementation may need adjustment based on actual NJS crypto API availability. Alternative approach is using OpenResty with Lua, which has more mature JWT libraries.
+
+### Step 2: Create Dockerfile.proxy
+
+Update: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/Dockerfile.proxy
+
+```dockerfile
+FROM nginx:1.27-alpine
+
+# Install NJS module (for JWT validation)
+RUN apk add --no-cache nginx-module-njs
+
+# Copy NGINX configuration
+COPY nginx/proxy.conf /etc/nginx/nginx.conf
+COPY nginx/jwt-validate.js /etc/nginx/jwt-validate.js
+
+# Copy frontend static files (from build context)
+COPY frontend /usr/share/nginx/html
+
+# Create directory for TLS certificates
+RUN mkdir -p /etc/nginx/ssl
+
+# Generate self-signed certificate for development
+# (In production, use Let's Encrypt or volume mount)
+RUN openssl req -x509 -newkey rsa:2048 -keyout /etc/nginx/ssl/key.pem \
+    -out /etc/nginx/ssl/cert.pem -days 365 -nodes \
+    -subj "/CN=localhost"
+
+# Expose HTTP (for redirect) and HTTPS
+EXPOSE 80 443
+
+# Start NGINX
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+### Step 3: Update compose.yaml
+
+Add proxy service and configuration:
+
+```yaml
+services:
+  # ... existing postgres, db-init, backend services ...
+
+  frontend:
+    image: sticky-frontend:latest
+    restart: unless-stopped
+    # Frontend doesn't need to expose port; proxy serves it
+    depends_on:
+      - backend
+
+  proxy:
+    image: sticky-proxy:latest
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "443:443"  # HTTPS entry point
+      - "80:80"    # HTTP redirect to HTTPS
+    environment:
+      JWT_SECRET: change-me-in-production  # Must match backend JWT_SECRET
+      # TLS certificates can be volume mounted for production
+
+volumes:
+  postgres_data:
+  # Add TLS certificate volume if using external certificates:
+  # tls_certs:
+```
+
+### Step 4: Update Makefile
+
+Ensure proxy image is built with other images:
+
+Line 61: Verify `image-all: image-backend image-frontend image-proxy` includes all three
+
+## Technical Requirements
+
+### Dependencies
+
+- NGINX 1.27-alpine base image (includes NJS module)
+- NJS crypto module for HMAC-SHA256 signature verification
+- HS256 JWT validation (symmetric-key HMAC)
+- openssl for TLS certificate generation
+
+### Environment Variables
+
+- `JWT_SECRET`: Shared secret for HS256 verification (must match backend JWT_SECRET)
+- Certificates: /etc/nginx/ssl/cert.pem and /etc/nginx/ssl/key.pem
+
+### JWT Token Format
+
+Expected token payload (from CLAUDE.md):
+```json
+{
+  "sub": 1,                          // User ID (numeric)
+  "session_id": "uuid-string",       // Session ID
+  "role": "admin" | "user",          // User role
+  "exp": 1677000000,                 // Expiration timestamp (seconds)
+  "iat": 1676999000                  // Issued at
+}
+```
+
+Signed with HS256 using JWT_SECRET.
+
+### Routing Table
+
+| Path | Auth | Destination | Purpose |
+|---|---|---|---|
+| POST /api/auth/login | No | backend:8080 | User login |
+| POST /api/auth/refresh | No | backend:8080 | Token refresh (HttpOnly cookie) |
+| GET /api/health | No | backend:8080 | Health check |
+| /api/* | Yes | backend:8080 | Protected API (with X-User-Id header) |
+| /thumbnails/* | No | thumbnailer:8080 | Cached thumbnails |
+| / | No | frontend or /index.html | SPA frontend |
+
+### TLS Certificates
+
+For development:
+- Self-signed cert generated in Dockerfile (`openssl req ...`)
+- Valid for 365 days
+- Subject: CN=localhost
+
+For production:
+- Volume mount externally managed certificates
+- Use Let's Encrypt + certbot, or cloud provider certs
+- Update Dockerfile to reference /etc/nginx/ssl/cert.pem and /etc/nginx/ssl/key.pem
+
+## Success Criteria
+
+1. Dockerfile.proxy builds successfully: `make image-proxy`
+2. NGINX starts without errors in container
+3. HTTP (port 80) redirects to HTTPS (port 443)
+4. Unauthenticated request to /api/subscriptions returns 403 with X-Redirect-To header
+5. Login request to /api/auth/login succeeds without JWT
+6. Valid JWT token in Authorization header passes validation
+7. Requests forwarded to backend include X-User-Id and X-User-Role headers
+8. Token refresh sets HttpOnly cookie for refresh_token
+9. Expired JWT token triggers 403 + redirect
+10. Frontend static files serve correctly at /
+11. SPA routing works: /subscriptions shows index.html (not 404)
+12. /thumbnails/* proxies to thumbnailer without auth
+13. docker compose up -d starts all services (backend, frontend, proxy)
+14. Accessing https://localhost through proxy works (self-signed cert warning)
+
+## Expected Outcome
+
+After completing this task:
+- NGINX proxy is the only public-facing service
+- Backend is not directly exposed to internet
+- All JWT validation happens at proxy layer
+- Frontend and backend served from same origin (no CORS issues)
+- TLS termination at proxy (backend runs plaintext internally)
+- Token refresh works seamlessly with HttpOnly cookies
+- System is production-ready for deployment
+
+## Reference Information
+
+- NGINX config location: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/nginx/proxy.conf
+- JWT validation script: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/nginx/jwt-validate.js
+- Dockerfile: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/Dockerfile.proxy
+- Backend JWT generation: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/backend/auth/auth.go
+- CLAUDE.md auth spec: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/CLAUDE.md (Authentication & Authorization)
+- Compose file: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/compose.yaml
+- NGINX NJS documentation: https://nginx.org/en/docs/njs/
+- JWT specification: https://tools.ietf.org/html/rfc7519 (RFC 7519)
+
+## Notes & Warnings
+
+- **SECURITY CRITICAL**: JWT_SECRET must be identical on backend and proxy, 32+ bytes, randomly generated
+- NJS crypto support may be limited; if HMAC fails, consider OpenResty + Lua as alternative
+- Self-signed certificates work for development but cause browser warnings; use proper certs in production
+- Refresh token is HttpOnly + Secure cookie (only sent over HTTPS)
+- Thumbnailer must be running for /thumbnails/* requests (or they will 503)
+- Frontend service and backend service must be reachable by proxy container (ensure docker network)
+- Keep proxy.conf and jwt-validate.js synchronized across deployments
+- Monitor error logs at /var/log/nginx/error.log for JWT validation issues
+- Test JWT validation thoroughly: expired tokens, invalid signatures, missing claims
+- NGINX upstream timeouts should be configured if backend is slow

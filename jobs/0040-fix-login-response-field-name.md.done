@@ -1,0 +1,123 @@
+---
+title: Fix login response field name: "token" → "access_token"
+created: 2026-02-20
+origin: Integration test script failure during Phase 1 completion of sticky-dvr backend implementation
+priority: high
+complexity: low
+notes:
+  - Blocks all 9 authenticated API tests in test-api.sh
+  - Simple two-line fix in backend/router/router.go
+  - Affects OAuth2 compatibility expectations
+  - Frontend and proxy will rely on this field name
+---
+
+Follow exactly and without stopping:
+
+## Task: Fix login response field name: "token" → "access_token"
+
+## Background & Context
+
+During Phase 1 completion of sticky-dvr (Go/PostgreSQL backend), the router's login handler was implemented in backend/router/router.go. Separately, an integration test script (scripts/test-api.sh) was created to validate the API endpoints. A field name mismatch was inadvertently introduced between these two components that causes all authenticated tests to fail silently.
+
+The problem affects two critical authentication endpoints:
+1. POST /api/auth/login (line 148 in backend/router/router.go)
+2. POST /api/auth/refresh (line 200 in backend/router/router.go)
+
+This is a security-critical bug because it makes the test suite unable to verify that authentication is working correctly. The mismatch will also cause the frontend (Phase 2) to fail when parsing login responses and will prevent the proxy JWT validation layer from working properly.
+
+## Problem Description
+
+Current behavior in backend/router/router.go:
+- Line 148-151 (login handler): Returns `{"token": token, "user": u}`
+- Line 200 (refreshToken handler): Returns `{"token": token}`
+
+Expected behavior in scripts/test-api.sh:
+- Line 72: Extracts token with `jq -r '.access_token // empty'`
+
+When the test runs:
+1. Test 3 (POST /api/auth/login) succeeds with 200 status
+2. The jq expression looks for `.access_token` field but finds `.token` instead
+3. jq returns empty string (// empty fallback)
+4. The `token` variable in the script becomes empty string
+5. Tests 4-12 all fail with 401 Unauthorized because `Authorization: Bearer ` header is sent without a token
+6. The test output shows silent failure without obvious explanation (appears as missing auth header)
+
+The correct field name is "access_token" because:
+- OAuth2 convention specifies "access_token" as the response field for tokens
+- CLAUDE.md plan documentation refers to the response as "returns JWT" suggesting OAuth2 alignment
+- Frontend code (Phase 2) will expect "access_token" field
+- NGINX proxy JWT validation layer will reference "access_token" in Authorization headers
+
+## Implementation Plan
+
+1. Open file: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/backend/router/router.go
+2. Locate the login handler function (starts at line 104)
+3. At line 148-151, change the map response from:
+   ```go
+   writeJSON(w, http.StatusOK, map[string]any{
+       "token": token,
+       "user":  u,
+   })
+   ```
+   to:
+   ```go
+   writeJSON(w, http.StatusOK, map[string]any{
+       "access_token": token,
+       "user":         u,
+   })
+   ```
+4. Locate the refreshToken handler function (starts at line 155)
+5. At line 200, change the map response from:
+   ```go
+   writeJSON(w, http.StatusOK, map[string]any{"token": token})
+   ```
+   to:
+   ```go
+   writeJSON(w, http.StatusOK, map[string]any{"access_token": token})
+   ```
+6. Save the file
+7. Compile and verify: Run `make build-backend`
+8. Verify the compile succeeds with exit code 0
+
+## Technical Requirements
+
+- File to edit: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/backend/router/router.go
+- Lines requiring change: 149 and 200 (the "token": token map entries)
+- Must change: map key from string "token" to string "access_token"
+- Do not change: the token value, function signatures, or any other code
+- Build command: `make build-backend`
+- Go compiler: 1.22+ (already installed, used by backend build system)
+
+## Success Criteria
+
+1. backend/router/router.go compiles without errors
+2. `make build-backend` exits with status code 0
+3. Binary is created at /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/dist/sticky-backend
+4. When tested against running backend: `./scripts/test-api.sh` successfully extracts token from login response (test 3 passes)
+5. Token variable is populated (non-empty string)
+6. Tests 4-12 execute with the token (instead of failing with 401)
+
+## Expected Outcome
+
+After this fix:
+- Integration test script passes test 3 (login) and extracts access_token correctly
+- Subsequent authenticated tests (4-12) execute without 401 errors
+- Backend is compatible with frontend and proxy expectations for "access_token" field
+- OAuth2 conventions are followed in API response format
+
+## Reference Information
+
+- Backend router file: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/backend/router/router.go
+- Test script using this field: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/scripts/test-api.sh (line 72)
+- Compile verification: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/Makefile (build-backend target, line 20-25)
+- Project documentation: /home/mmulligan/Development/whisper-darkly-github/sticky-dvr/CLAUDE.md (auth section)
+- Related test functions: test 3 (login), tests 4-12 (authenticated endpoints)
+
+## Notes & Warnings
+
+- This is a critical bug affecting test suite validation
+- The field name must be exactly "access_token" (case-sensitive) to match OAuth2 conventions and jq extraction logic
+- This change will be relied upon by Phase 2 frontend implementation
+- Do not modify function logic, only the response map keys
+- The router.go file has no other "token" keys that need changing in response maps
+- After fix, the backend will be ready for integration with frontend and proxy layers
