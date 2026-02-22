@@ -1,0 +1,93 @@
+---
+title: Add skeleton loading states to dashboard and subscriptions pages
+created: 2026-02-22
+origin: POC audit identified flash of empty content during initial data fetch
+priority: low
+complexity: low
+notes:
+  - Skeleton cards prevent jarring empty-content flash
+  - CSS-only approach preferred (no JS library)
+  - Apply to dashboard and subscriptions pages
+  - Remove skeletons once real data is loaded
+---
+
+Follow exactly and without stopping:
+
+## Task: Add skeleton loading states to dashboard and subscriptions pages
+
+## Background & Context
+
+The dashboard and subscriptions pages fetch data from the API on load. During the initial
+fetch (typically <1 second), the pages show empty content before the data arrives. This
+creates a jarring visual experience. Skeleton loading states show placeholder cards in the
+same layout as real content, giving users visual feedback that content is loading.
+
+## Changes Required
+
+Read the following files first to understand current structure:
+- `frontend/js/pages/dashboard.js`
+- `frontend/js/pages/subscriptions.js`
+- `frontend/css/main.css` (or equivalent styles file)
+- The HTML templates for dashboard and subscriptions pages
+
+### 1. CSS: Add skeleton animation styles
+
+In the main CSS file, add:
+```css
+.skeleton {
+  background: linear-gradient(90deg, #e0e0e0 25%, #f0f0f0 50%, #e0e0e0 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeleton-card {
+  /* Match the dimensions of real subscription/source cards */
+  height: 80px;
+  margin-bottom: 12px;
+}
+```
+
+### 2. Dashboard page
+
+In `dashboard.js`:
+- Show 3 skeleton cards in the sources/subscriptions list container before the first fetch
+- Remove skeleton cards and render real data once fetch completes
+- On fetch error, remove skeleton cards and show error state
+
+### 3. Subscriptions page
+
+In `subscriptions.js`:
+- Show 4 skeleton cards in the subscriptions list container before the first fetch
+- Remove skeleton cards and render real data once fetch completes
+- On fetch error, remove skeleton cards and show error state
+
+## Implementation Pattern
+
+```javascript
+// Before fetch
+function showSkeletons(container, count) {
+  container.innerHTML = Array(count).fill(
+    '<div class="skeleton skeleton-card"></div>'
+  ).join('');
+}
+
+// After fetch
+function clearSkeletons(container) {
+  container.innerHTML = '';
+}
+```
+
+## Acceptance Criteria
+
+- [ ] Dashboard shows 3 skeleton cards during initial load
+- [ ] Subscriptions page shows 4 skeleton cards during initial load
+- [ ] Skeletons are replaced by real data once loaded
+- [ ] Skeletons are replaced by error state if fetch fails
+- [ ] CSS shimmer animation is smooth and not distracting
+- [ ] No flash of empty content (blank white space) on load

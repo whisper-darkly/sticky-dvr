@@ -1,0 +1,68 @@
+---
+title: Add make bootstrap, make logs-all, and make restart targets to Makefile
+created: 2026-02-22
+origin: POC audit identified missing single-command bootstrap for the stack
+priority: high
+complexity: low
+notes:
+  - bootstrap should be idempotent (skip cert gen if certs already exist)
+  - images must be built before compose up
+  - logs-all and restart are convenience targets for day-to-day dev
+---
+
+Follow exactly and without stopping:
+
+## Task: Add Makefile bootstrap and convenience targets
+
+## Background & Context
+
+Currently there is no single command to go from zero to a running sticky-dvr stack. Users must
+manually: generate TLS certs, build all 3 Docker images, then run docker compose up. The
+`make dev-certs` target exists for cert generation, and `make image-all` and `make run-all`
+exist, but they are not chained together.
+
+## Changes Required
+
+Read the current Makefile first to understand existing targets and structure, then add:
+
+### 1. `make bootstrap`
+A top-level target that:
+1. Generates TLS certs if `certs/tls.crt` doesn't exist (call `make dev-certs`)
+2. Builds all 3 Docker images (call `make image-all`)
+3. Starts the stack with `docker compose up -d`
+
+Must be idempotent — if certs already exist and images are already built, it should still
+work correctly (just skip or re-run docker compose up).
+
+### 2. `make logs-all`
+Follows logs from all running compose services:
+```
+docker compose logs -f
+```
+
+### 3. `make restart`
+Restarts all compose services without rebuilding:
+```
+docker compose restart
+```
+
+### 4. `make down`
+If it doesn't already exist, add a `make down` that tears down the stack:
+```
+docker compose down
+```
+
+## Implementation Notes
+
+- Check if `certs/tls.crt` exists using a shell conditional in the Makefile recipe
+- Existing `make dev-certs` target should be the cert generation mechanism
+- The `.PHONY` list should be updated to include all new targets
+- Keep the existing pattern/style of the Makefile
+
+## Acceptance Criteria
+
+- [ ] `make bootstrap` runs without error on a clean checkout (no certs, no images)
+- [ ] Running `make bootstrap` twice succeeds (idempotent)
+- [ ] `make logs-all` runs `docker compose logs -f`
+- [ ] `make restart` runs `docker compose restart`
+- [ ] New targets appear in `.PHONY`

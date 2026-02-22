@@ -1,0 +1,72 @@
+---
+title: Frontend health poll — treat 503 as degraded state, not error
+created: 2026-02-22
+origin: POC audit identified that health 503 shows error alert instead of amber badge
+priority: medium
+complexity: low
+notes:
+  - 503 from /api/health means overseer is offline — not a stack failure
+  - Response body contains overseer_connected field to distinguish
+  - Show amber badge, not error pop-up
+  - Only applies to dashboard.js health poll
+---
+
+Follow exactly and without stopping:
+
+## Task: Graceful 503 handling in dashboard health poll
+
+## Background & Context
+
+The sticky-dvr backend returns HTTP 503 from `GET /api/health` when the overseer WebSocket
+connection is down. This is expected behavior when running without the overseer container.
+The current dashboard health poll may display an error alert in this case, causing confusion
+for users who are running the stack without the overseer.
+
+The `/api/health` response body has the shape:
+```json
+{
+  "status": "ok" | "degraded",
+  "overseer_connected": true | false,
+  "db": "ok",
+  "version": "..."
+}
+```
+
+When `overseer_connected` is false, the status field is "degraded" and HTTP status is 503.
+
+## Changes Required
+
+Read `frontend/js/pages/dashboard.js` first to understand the current health poll implementation.
+
+### In `frontend/js/pages/dashboard.js`:
+
+1. In the health poll function (likely called every 5 seconds), catch both network errors
+   and HTTP error status codes.
+
+2. Distinguish between:
+   - HTTP 200 with `overseer_connected: true` → normal state, no badge
+   - HTTP 503 with `overseer_connected: false` → show amber "Overseer offline" badge
+   - Other errors (network down, 500, etc.) → show red "Backend offline" badge or existing error behavior
+
+3. Add/update a status badge in the dashboard header area. The badge should:
+   - Use an amber/yellow color when overseer is offline
+   - Use a red color for actual errors
+   - Be hidden when everything is healthy
+   - Update dynamically as poll results change
+
+4. Do NOT show an error modal/alert for the 503 case.
+
+## Implementation Notes
+
+- The badge can be a simple `<span>` element with CSS classes for color states
+- Existing error handling should remain for non-503 failures
+- If there's already a status indicator in the HTML template, use/update that
+- Read the HTML template for dashboard to understand existing structure before modifying JS
+
+## Acceptance Criteria
+
+- [ ] A 503 response from `/api/health` does NOT trigger an error alert/modal
+- [ ] An amber "Overseer offline" badge is shown when `overseer_connected: false`
+- [ ] The badge disappears when the overseer reconnects
+- [ ] Other errors (500, network failure) still show appropriate error indicators
+- [ ] No regression in normal (200) health response handling

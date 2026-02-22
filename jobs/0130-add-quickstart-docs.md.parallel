@@ -1,0 +1,82 @@
+---
+title: Create QUICKSTART.md with from-zero-to-running guide
+created: 2026-02-22
+origin: POC audit identified no user-facing documentation for getting the stack running
+priority: medium
+complexity: low
+notes:
+  - Single-page quickstart, not comprehensive docs
+  - Must include environment variables section
+  - Note that 503 from health is expected when overseer not running
+  - Include both make bootstrap shortcut and manual step-by-step
+---
+
+Follow exactly and without stopping:
+
+## Task: Create QUICKSTART.md
+
+## Background & Context
+
+New users of the sticky-dvr stack have no guide for getting from a clean checkout to a running
+system. The CLAUDE.md describes the architecture but doesn't provide operational steps.
+
+## File to Create: `QUICKSTART.md`
+
+Create `QUICKSTART.md` in the repo root. Read `Makefile`, `compose.yaml`, and `CLAUDE.md`
+first to understand what make targets exist and what environment variables are required.
+
+The file should cover:
+
+### Section 1: Prerequisites
+- Docker and Docker Compose
+- Make
+- Git (for cloning)
+
+### Section 2: Quick Start (single command)
+```
+make bootstrap
+```
+Then open https://localhost and accept the self-signed certificate warning.
+Login with `admin` / `admin`.
+
+### Section 3: What to Expect
+- The health endpoint (`/api/health`) may return 503 — this is normal when the overseer
+  container is not running. The `overseer_connected: false` field in the response body
+  distinguishes this from a real error.
+- The dashboard shows an "Overseer offline" badge in this case, not an error.
+- An empty subscriptions list on first login is expected.
+
+### Section 4: Step-by-Step (manual)
+For users who prefer to understand each step:
+1. Generate TLS certs: `make dev-certs`
+2. Build images: `make image-all`
+3. Start stack: `make run-all`
+4. Check status: `docker compose ps`
+
+### Section 5: Environment Variables
+Document the key env vars (sourced from compose.yaml and CLAUDE.md):
+- `DB_DSN` — PostgreSQL DSN (default: compose-internal)
+- `JWT_SECRET` — HS256 shared secret (change in production!)
+- `OVERSEER_URL` — WebSocket URL for the overseer service
+- `CONVERTER_URL` — HTTP URL for the converter service
+
+### Section 6: Useful Commands
+- `make logs-all` — Follow all service logs
+- `make restart` — Restart all services
+- `make down` — Stop all services
+- `make dev` — HTTP-only mode (no TLS, port 8080)
+
+### Section 7: Troubleshooting
+- Port 443 in use → check for other NGINX instances
+- Cert warning → expected for self-signed certs, accept it
+- Login fails with 401 → check JWT_SECRET matches between proxy and backend
+- Backend won't start → check DB_DSN and that postgres service is healthy
+
+## Acceptance Criteria
+
+- [ ] `QUICKSTART.md` exists in repo root
+- [ ] Covers single-command bootstrap
+- [ ] Explains 503/overseer-offline as expected
+- [ ] Documents all key env vars
+- [ ] Step-by-step manual section present
+- [ ] Troubleshooting section with common issues

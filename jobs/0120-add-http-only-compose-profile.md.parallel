@@ -1,0 +1,72 @@
+---
+title: Add HTTP-only compose override and make dev target for local development
+created: 2026-02-22
+origin: POC audit identified that all traffic is forced through TLS proxy, making pure local dev harder
+priority: medium
+complexity: medium
+notes:
+  - HTTP-only mode bypasses JWT validation entirely — only for local dev
+  - Must not affect the default compose.yaml (main stack remains TLS+JWT)
+  - Override file pattern: compose.override.http.yaml
+  - The make dev target uses this override
+---
+
+Follow exactly and without stopping:
+
+## Task: Add HTTP-only compose override for local development
+
+## Background & Context
+
+The current sticky-dvr stack requires TLS and JWT validation via the NGINX proxy. For pure
+local development, this adds friction (cert warnings, JWT setup). An HTTP-only mode would
+serve the frontend and proxy the API without TLS or JWT validation.
+
+## Files to Create/Modify
+
+### 1. Create `compose.override.http.yaml`
+
+This file should:
+- Override the `proxy` service to use a simple NGINX config (no TLS, no JWT)
+- Expose port 8080 instead of 443
+- Serve frontend static files from the same location
+- Forward all `/api/` requests to the backend service
+- Pass synthetic `X-User-Id: 1` and `X-User-Role: admin` headers to backend
+  (so backend auth works without real JWT validation)
+
+The override should be a valid Docker Compose override file that works with:
+```
+docker compose -f compose.yaml -f compose.override.http.yaml up -d
+```
+
+The NGINX config for the HTTP-only proxy should be written inline using the `command` or
+`volumes` approach in the override file, or as a separate file `proxy/proxy.dev.conf`.
+
+### 2. Modify `Makefile` — add `make dev` target
+
+Add:
+```makefile
+dev: ## Start stack in HTTP-only dev mode (no TLS, no JWT)
+	docker compose -f compose.yaml -f compose.override.http.yaml up -d
+
+dev-down: ## Stop HTTP-only dev stack
+	docker compose -f compose.yaml -f compose.override.http.yaml down
+```
+
+## HTTP-only NGINX Config Requirements
+
+The dev proxy should:
+- Listen on port 80 (mapped to host 8080)
+- Serve `/` from the frontend static files directory
+- Proxy `/api/` to `http://backend:8080/api/`
+- Set `X-User-Id: 1` and `X-User-Role: admin` on all backend requests
+- No SSL configuration
+- No JWT validation
+- `proxy_pass` for `/thumbnails/` to `http://thumbnailer:8080/` (can be a no-op if service not running)
+
+## Acceptance Criteria
+
+- [ ] `compose.override.http.yaml` exists and is valid YAML
+- [ ] `make dev` runs `docker compose -f compose.yaml -f compose.override.http.yaml up -d`
+- [ ] `make dev-down` tears down the dev stack
+- [ ] The override file does not modify `compose.yaml`
+- [ ] New targets added to `.PHONY` in Makefile
