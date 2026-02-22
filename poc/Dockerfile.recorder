@@ -1,0 +1,60 @@
+# Build context: whisper-darkly-github/ (parent of sticky-dvr, sticky-overseer, sticky-recorder)
+#
+# Builds sticky-overseer + sticky-recorder from local source.
+# Used in compose.poc.yaml instead of the upstream Dockerfile that
+# clones overseer from GitHub.
+
+FROM golang:1.24-alpine AS builder
+
+RUN apk add --no-cache make
+
+# swag is required by sticky-overseer's `make generate` step (generates OpenAPI docs)
+RUN go install github.com/swaggo/swag/cmd/swag@latest
+
+# Build sticky-overseer (provides the WebSocket orchestrator binary)
+WORKDIR /src/sticky-overseer
+COPY sticky-overseer/ ./
+RUN make install PREFIX=/out
+
+# Build sticky-recorder (the actual stream-capture binary)
+WORKDIR /src/sticky-recorder
+COPY sticky-recorder/ ./
+RUN make install PREFIX=/out
+
+
+FROM alpine:3.21
+
+RUN apk add --no-cache ffmpeg ca-certificates tzdata
+
+# Both binaries land in /usr/local/bin/
+COPY --from=builder /out/bin/ /usr/local/bin/
+
+# Default overseer config (baked in; override by mounting /etc/sticky-overseer/config.yaml)
+COPY sticky-recorder/docker/config.yaml /etc/sticky-overseer/config.yaml
+
+# sticky-overseer settings
+ENV OVERSEER_CONFIG=/etc/sticky-overseer/config.yaml
+ENV OVERSEER_PORT=8080
+ENV OVERSEER_TRUSTED_CIDRS=""
+ENV OVERSEER_LOG_FILE=/data/overseer.jsonl
+ENV OVERSEER_DB=/data/overseer.db
+
+# sticky-recorder defaults (overridden by the overseer config's command templates)
+ENV STICKY_RESOLUTION=720
+ENV STICKY_FRAMERATE=30
+ENV STICKY_SEGMENT_LENGTH=""
+ENV STICKY_COOKIES=""
+ENV STICKY_USER_AGENT=""
+ENV STICKY_LOG_LEVEL=error
+ENV STICKY_OUTPUT_FORMAT=json
+ENV STICKY_RETRY_DELAY=5s
+ENV STICKY_SEGMENT_TIMEOUT=5m
+ENV STICKY_RECORDING_TIMEOUT=30m
+ENV STICKY_CHECK_INTERVAL=1m
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:${OVERSEER_PORT}/ws 2>&1 | grep -q "400 Bad Request" || exit 1
+
+CMD ["sticky-overseer"]

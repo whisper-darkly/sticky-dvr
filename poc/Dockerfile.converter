@@ -1,0 +1,37 @@
+# Build context: whisper-darkly-github/ (parent of sticky-dvr, sticky-overseer, sticky-converter)
+#
+# sticky-converter's go.mod has a replace directive:
+#   replace github.com/whisper-darkly/sticky-overseer/v2 => ../sticky-overseer
+#
+# Placing sticky-overseer at /src/sticky-overseer and sticky-converter at
+# /src/sticky-refinery mirrors the relative path ../sticky-overseer expected
+# by the replace directive.
+
+FROM golang:1.24-alpine AS builder
+
+RUN apk add --no-cache make
+
+# Overseer source must be present for the replace directive to resolve
+COPY sticky-overseer/ /src/sticky-overseer/
+
+# Build sticky-refinery (converter)
+WORKDIR /src/sticky-refinery
+COPY sticky-converter/ ./
+RUN mkdir -p /out/bin && make install PREFIX=/out
+
+
+FROM alpine:3.21
+
+RUN apk add --no-cache ffmpeg ca-certificates tzdata
+
+COPY --from=builder /out/bin/sticky-refinery /usr/local/bin/sticky-refinery
+
+ENV OVERSEER_LISTEN=:8080
+ENV OVERSEER_DB=/data/refinery.db
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -q --spider http://localhost:8080/openapi.json || exit 1
+
+CMD ["sticky-refinery", "-config", "/data/config.yaml"]
