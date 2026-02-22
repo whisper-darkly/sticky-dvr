@@ -8,6 +8,7 @@
 const PUBLIC_PATHS = [
   '/api/auth/login',
   '/api/auth/refresh',
+  '/api/health',
   '/thumbnails/',
 ];
 
@@ -67,8 +68,10 @@ function validateJwt(r) {
     return;
   }
 
-  const [headerB64, payloadB64, sigB64] = parts;
-  const signingInput = `${headerB64}.${payloadB64}`;
+  const headerB64    = parts[0];
+  const payloadB64   = parts[1];
+  const sigB64       = parts[2];
+  const signingInput = headerB64 + '.' + payloadB64;
 
   // Verify signature
   const expectedSig = hmacSha256(secret, signingInput);

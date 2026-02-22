@@ -3,12 +3,11 @@ FROM nginx:1.27-alpine
 # NJS module (.so) is already bundled in the official nginx:1.27-alpine image at
 # /usr/lib/nginx/modules/ngx_http_js_module.so — no apk install needed.
 
-# Load the NJS dynamic module (must appear before events/http blocks in nginx.conf).
-RUN printf 'load_module /usr/lib/nginx/modules/ngx_http_js_module.so;\n' \
-    > /etc/nginx/modules/njs.conf
-
-# Expose JWT_SECRET env var so NJS can read it via process.env.JWT_SECRET.
-# The env directive must be in the main nginx.conf context, not conf.d.
+# Load the NJS dynamic module and expose JWT_SECRET env var.
+# Both directives must appear in the main nginx.conf context (before events/http blocks),
+# not in conf.d/ files (which are included inside the http {} block).
+# We prepend them to nginx.conf with two sed commands.
+RUN sed -i '1i load_module /usr/lib/nginx/modules/ngx_http_js_module.so;' /etc/nginx/nginx.conf
 RUN sed -i '1i env JWT_SECRET;' /etc/nginx/nginx.conf
 
 # NJS script directory
