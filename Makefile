@@ -11,7 +11,7 @@ DIST := dist
         image-backend image-frontend image-proxy \
         run-backend run-postgres run-all \
         export-backend export-frontend export-proxy \
-        clean
+        dev-certs clean
 
 # ---- build ----
 
@@ -92,6 +92,14 @@ export-proxy:
 	@echo "Saved $(DIST)/$(PROXY_IMAGE)-$(VERSION).tar.gz"
 
 export-all: export-backend export-frontend export-proxy
+
+# ---- dev TLS certs (self-signed, localhost only) ----
+
+dev-certs:
+	mkdir -p certs
+	openssl req -x509 -newkey rsa:4096 -nodes -days 365 \
+		-keyout certs/tls.key -out certs/tls.crt \
+		-subj '/CN=localhost'
 
 # ---- clean ----
 

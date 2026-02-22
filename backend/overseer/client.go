@@ -23,18 +23,18 @@ type RetryPolicy struct {
 
 // TaskInfo mirrors the overseer's TaskInfo response.
 type TaskInfo struct {
-	TaskID        string     `json:"task_id"`
-	Command       string     `json:"command"`
-	Args          []string   `json:"args"`
-	State         string     `json:"state"`        // active | stopped | errored
-	WorkerState   string     `json:"worker_state"` // running | exited
-	CurrentPID    int        `json:"current_pid,omitempty"`
-	RestartCount  int        `json:"restart_count"`
-	CreatedAt     time.Time  `json:"created_at"`
-	LastStartedAt *time.Time `json:"last_started_at,omitempty"`
-	LastExitedAt  *time.Time `json:"last_exited_at,omitempty"`
-	LastExitCode  *int       `json:"last_exit_code,omitempty"`
-	ErrorMessage  string     `json:"error_message,omitempty"`
+	TaskID        string            `json:"task_id"`
+	Action        string            `json:"action"`
+	Params        map[string]string `json:"params,omitempty"`
+	State         string            `json:"state"`        // active | stopped | errored
+	WorkerState   string            `json:"worker_state"` // running | exited
+	CurrentPID    int               `json:"current_pid,omitempty"`
+	RestartCount  int               `json:"restart_count"`
+	CreatedAt     time.Time         `json:"created_at"`
+	LastStartedAt *time.Time        `json:"last_started_at,omitempty"`
+	LastExitedAt  *time.Time        `json:"last_exited_at,omitempty"`
+	LastExitCode  *int              `json:"last_exit_code,omitempty"`
+	ErrorMessage  string            `json:"error_message,omitempty"`
 }
 
 // Handler receives broadcast events from the overseer.
@@ -244,9 +244,9 @@ func (c *Client) nextID() string {
 	return fmt.Sprintf("r%d", c.idSeq.Add(1))
 }
 
-// Start asks the overseer to spawn a task with the given task_id, args, and retry policy.
+// Start asks the overseer to spawn a task with the given task_id, action, params, and retry policy.
 // If taskID is empty, the overseer will auto-generate one (returned in result).
-func (c *Client) Start(ctx context.Context, taskID string, args []string, rp *RetryPolicy) (string, int, error) {
+func (c *Client) Start(ctx context.Context, taskID string, action string, params map[string]string, rp *RetryPolicy) (string, int, error) {
 	id := c.nextID()
 	ch := make(chan startResult, 1)
 	c.startPending.Store(id, ch)
@@ -255,7 +255,8 @@ func (c *Client) Start(ctx context.Context, taskID string, args []string, rp *Re
 		"type":    "start",
 		"id":      id,
 		"task_id": taskID,
-		"args":    args,
+		"action":  action,
+		"params":  params,
 	}
 	if rp != nil {
 		msg["retry_policy"] = rp
@@ -279,19 +280,43 @@ func (c *Client) Start(ctx context.Context, taskID string, args []string, rp *Re
 }
 
 // Stop sends a stop command for the given task_id.
+// The overseer does not send a success acknowledgement for stop, so this is
+// fire-and-forget; a correlation ID is included so error responses can be traced.
 func (c *Client) Stop(taskID string) error {
 	return c.send(map[string]any{
 		"type":    "stop",
+		"id":      c.nextID(),
 		"task_id": taskID,
 	})
 }
 
 // Reset clears the errored state for a task and restarts it.
-func (c *Client) Reset(taskID string) error {
-	return c.send(map[string]any{
+// The overseer responds with a "started" message on success or "error" on failure,
+// both carrying the same correlation ID, so this call blocks until one arrives.
+func (c *Client) Reset(ctx context.Context, taskID string) (int, error) {
+	id := c.nextID()
+	ch := make(chan startResult, 1)
+	c.startPending.Store(id, ch)
+
+	if err := c.send(map[string]any{
 		"type":    "reset",
+		"id":      id,
 		"task_id": taskID,
-	})
+	}); err != nil {
+		c.startPending.Delete(id)
+		return 0, err
+	}
+
+	select {
+	case res := <-ch:
+		return res.pid, res.err
+	case <-ctx.Done():
+		c.startPending.Delete(id)
+		return 0, ctx.Err()
+	case <-time.After(10 * time.Second):
+		c.startPending.Delete(id)
+		return 0, fmt.Errorf("timeout waiting for reset confirmation")
+	}
 }
 
 // List returns all tasks tracked by the overseer.

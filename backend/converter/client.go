@@ -1,111 +1,157 @@
-// Package converter provides an HTTP client for the sticky-converter (sticky-refinery) service.
-// The converter tracks video file conversion tasks, identified by filesystem path.
-// Files belonging to a source are identified by path containing "/{driver}/{username}/".
+// Package converter provides a WebSocket client for the sticky-converter (sticky-refinery) service.
+// The converter uses sticky-overseer v2 protocol at /ws.
+// Note: the converter only exposes queued/active/errored tasks; successfully completed
+// conversions are tracked in the converter's internal DB and not exposed via this API.
 package converter
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
-// FileInfo describes a single converted (or in-progress) file returned to API consumers.
+// FileInfo describes a single conversion task returned to API consumers.
 type FileInfo struct {
-	Filename    string     `json:"filename"`
-	Path        string     `json:"path"`
-	Status      string     `json:"status"`
-	Pipeline    string     `json:"pipeline"`
-	QueuedAt    *time.Time `json:"queued_at,omitempty"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-	ErrorCount  int        `json:"error_count,omitempty"`
+	Filename   string `json:"filename"`
+	Path       string `json:"path"`
+	Status     string `json:"status"`
+	Pipeline   string `json:"pipeline"`
+	ErrorCount int    `json:"error_count,omitempty"`
 }
 
-// converterTask mirrors the JSON shape returned by GET /tasks on sticky-refinery.
-type converterTask struct {
-	Path            string     `json:"Path"`
-	PipelineName    string     `json:"PipelineName"`
-	Status          string     `json:"Status"`
-	ErrorCount      int        `json:"ErrorCount"`
-	ErrorMessage    string     `json:"ErrorMessage"`
-	QueuedAt        *time.Time `json:"QueuedAt"`
-	StartedAt       *time.Time `json:"StartedAt"`
-	CompletedAt     *time.Time `json:"CompletedAt"`
-	LastAttemptedAt *time.Time `json:"LastAttemptedAt"`
+// taskInfo mirrors the overseer v2 TaskInfo for converter tasks.
+type taskInfo struct {
+	TaskID       string            `json:"task_id"`
+	Action       string            `json:"action"`
+	Params       map[string]string `json:"params,omitempty"`
+	State        string            `json:"state"`
+	RestartCount int               `json:"restart_count"`
+	ErrorMessage string            `json:"error_message,omitempty"`
 }
 
-// Client is an HTTP client for the sticky-refinery converter service.
+// Client is a WebSocket client for the sticky-converter service.
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
+	wsURL string
+	idSeq atomic.Int64
 }
 
-// NewClient returns a Client targeting the given base URL (e.g. "http://converter:8080").
-func NewClient(baseURL string) *Client {
-	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
-	}
+// NewClient returns a Client targeting the given WebSocket URL (e.g. "ws://converter:8080/ws").
+func NewClient(wsURL string) *Client {
+	return &Client{wsURL: strings.TrimRight(wsURL, "/")}
 }
 
-// GetFiles fetches tasks from sticky-refinery that belong to the given driver/username
-// source. Matching is done by checking whether the task's path contains the
-// subpath "/{driver}/{username}/".
-// If the converter service is unreachable, an empty list is returned (graceful degradation).
+func (c *Client) nextID() string {
+	return fmt.Sprintf("r%d", c.idSeq.Add(1))
+}
+
+// GetFiles dials the converter, lists all tasks, and returns those belonging to the given
+// driver/username source (matched on params["file"] containing "/{driver}/{username}/").
+// Returns an empty list if the converter is unreachable (graceful degradation).
 func (c *Client) GetFiles(ctx context.Context, driver, username string) ([]FileInfo, error) {
-	// The path segment we expect inside converter task paths.
-	// Example: tasks for "chaturbate/alice" will have paths like
-	//   /recordings/chaturbate/alice/2024-01-01_stream.mp4
 	subpath := fmt.Sprintf("/%s/%s/", driver, username)
 
-	url := fmt.Sprintf("%s/tasks?limit=200", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-
-	resp, err := c.httpClient.Do(req)
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, c.wsURL, nil)
 	if err != nil {
 		// Converter unreachable — degrade gracefully.
 		return []FileInfo{}, nil
 	}
-	defer resp.Body.Close()
+	defer conn.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		// Non-200 from converter — return empty list rather than propagating.
+	reqID := c.nextID()
+	req, _ := json.Marshal(map[string]any{"type": "list", "id": reqID})
+	if err := conn.WriteMessage(websocket.TextMessage, req); err != nil {
 		return []FileInfo{}, nil
 	}
 
-	var tasks []converterTask
-	if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {
-		return nil, fmt.Errorf("decode converter response: %w", err)
-	}
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			return []FileInfo{}, nil
+		}
 
+		var msg struct {
+			Type  string     `json:"type"`
+			ID    string     `json:"id"`
+			Tasks []taskInfo `json:"tasks"`
+		}
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			continue
+		}
+		if msg.Type == "tasks" && msg.ID == reqID {
+			return filterTasks(msg.Tasks, subpath), nil
+		}
+	}
+}
+
+func filterTasks(tasks []taskInfo, subpath string) []FileInfo {
 	var files []FileInfo
 	for _, t := range tasks {
-		// Match by path segment — case-insensitive to handle filesystem variations.
-		if !strings.Contains(strings.ToLower(t.Path), strings.ToLower(subpath)) {
+		filePath := t.Params["file"]
+		if !strings.Contains(strings.ToLower(filePath), strings.ToLower(subpath)) {
 			continue
 		}
 		files = append(files, FileInfo{
-			Filename:    filepath.Base(t.Path),
-			Path:        t.Path,
-			Status:      t.Status,
-			Pipeline:    t.PipelineName,
-			QueuedAt:    t.QueuedAt,
-			StartedAt:   t.StartedAt,
-			CompletedAt: t.CompletedAt,
-			ErrorCount:  t.ErrorCount,
+			Filename:   filepath.Base(filePath),
+			Path:       filePath,
+			Status:     t.State,
+			Pipeline:   t.Action,
+			ErrorCount: t.RestartCount,
 		})
 	}
 	if files == nil {
 		files = []FileInfo{}
 	}
-	return files, nil
+	return files
+}
+
+// QueueFile sends a start request to the converter to queue the given file for conversion.
+func (c *Client) QueueFile(ctx context.Context, filePath string) error {
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, c.wsURL, nil)
+	if err != nil {
+		return fmt.Errorf("connect to converter: %w", err)
+	}
+	defer conn.Close()
+
+	reqID := c.nextID()
+	req, _ := json.Marshal(map[string]any{
+		"type":    "start",
+		"id":      reqID,
+		"action":  "convert",
+		"params":  map[string]string{"file": filePath},
+	})
+	if err := conn.WriteMessage(websocket.TextMessage, req); err != nil {
+		return fmt.Errorf("send queue request: %w", err)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		_, raw, readErr := conn.ReadMessage()
+		if readErr != nil {
+			return fmt.Errorf("read response: %w", readErr)
+		}
+		var resp struct {
+			Type    string `json:"type"`
+			ID      string `json:"id"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			continue
+		}
+		if resp.ID != reqID {
+			continue
+		}
+		if resp.Type == "started" {
+			return nil
+		}
+		if resp.Type == "error" {
+			return fmt.Errorf("converter: %s", resp.Message)
+		}
+	}
 }

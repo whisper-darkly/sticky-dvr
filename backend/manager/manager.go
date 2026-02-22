@@ -334,7 +334,6 @@ func (m *Manager) startWorker(sourceID int64) {
 	}()
 
 	g := m.cfg.Get()
-	args := buildArgs(src.Driver, src.Username, g)
 	rp := &overseer.RetryPolicy{
 		RestartDelay:   g.RestartDelay,
 		ErrorWindow:    g.ErrorWindow,
@@ -344,7 +343,8 @@ func (m *Manager) startWorker(sourceID int64) {
 	ctx, cancel := context.WithTimeout(m.ctx, 20*time.Second)
 	defer cancel()
 
-	gotTaskID, pid, err := m.oc.Start(ctx, taskID, args, rp)
+	gotTaskID, pid, err := m.oc.Start(ctx, taskID, src.Driver,
+		map[string]string{"source": src.Username}, rp)
 	if err != nil {
 		log.Printf("manager: start worker for %s/%s: %v", src.Driver, src.Username, err)
 		state.addLog(fmt.Sprintf("[system] start failed: %v", err))
@@ -551,7 +551,9 @@ func (m *Manager) ResetError(ctx context.Context, userID int64, driver, username
 	}
 
 	if taskID != "" {
-		if err := m.oc.Reset(taskID); err != nil {
+		resetCtx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
+		defer cancel()
+		if _, err := m.oc.Reset(resetCtx, taskID); err != nil {
 			return nil, fmt.Errorf("overseer reset: %w", err)
 		}
 	} else {
@@ -782,45 +784,6 @@ func (m *Manager) statusFor(src *store.Source, sub *store.Subscription) *Subscri
 	state.mu.Unlock()
 
 	return s
-}
-
-// ---- args builder ----
-
-func buildArgs(driver, username string, g config.Data) []string {
-	args := []string{
-		"--source", username,
-		"--driver", driver,
-		"--resolution", fmt.Sprintf("%d", g.Resolution),
-		"--framerate", fmt.Sprintf("%d", g.Framerate),
-		"--out", g.OutPattern,
-		"--log-level", g.LogLevel,
-		"--output-format", "json",
-	}
-	if g.LogPattern != "" {
-		args = append(args, "--log", g.LogPattern)
-	}
-	if g.CheckInterval != "" {
-		args = append(args, "--check-interval", g.CheckInterval)
-	}
-	if g.RetryDelay != "" {
-		args = append(args, "--retry-delay", g.RetryDelay)
-	}
-	if g.SegmentLength != "" {
-		args = append(args, "--segment-length", g.SegmentLength)
-	}
-	if g.SegmentTimeout != "" {
-		args = append(args, "--segment-timeout", g.SegmentTimeout)
-	}
-	if g.RecordingTimeout != "" {
-		args = append(args, "--recording-timeout", g.RecordingTimeout)
-	}
-	if g.Cookies != "" {
-		args = append(args, "--cookies", g.Cookies)
-	}
-	if g.UserAgent != "" {
-		args = append(args, "--user-agent", g.UserAgent)
-	}
-	return args
 }
 
 func parseDuration(s string, def time.Duration) time.Duration {

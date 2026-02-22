@@ -1,15 +1,52 @@
 #!/usr/bin/env bash
 # test-api.sh — sticky-backend API integration tests
 #
-# Usage: ./scripts/test-api.sh [BASE_URL]
-#   Default BASE_URL: http://localhost:8080
-#   Admin creds: ADMIN_USER (default: admin) ADMIN_PASS (default: admin)
+# Usage:
+#   ./scripts/test-api.sh [--direct|--proxy] [BASE_URL]
+#
+# Modes:
+#   --direct  Target the backend directly at http://localhost:8080 (no TLS, no JWT proxy).
+#             Auth is Bearer token in Authorization header as returned by /api/auth/login.
+#             Default when no mode flag is given.
+#
+#   --proxy   Target the full stack through sticky-proxy at https://localhost.
+#             Uses -k (insecure) to accept self-signed dev certs.
+#             Same API contract; proxy validates JWT and forwards X-User-Id/X-User-Role.
+#
+# Environment:
+#   ADMIN_USER  (default: admin)
+#   ADMIN_PASS  (default: admin)
 
 set -euo pipefail
 
-BASE_URL="${1:-http://localhost:8080}"
+# ---- parse mode / URL ----
+MODE="direct"
+BASE_URL=""
+
+for arg in "$@"; do
+  case "$arg" in
+    --direct) MODE="direct" ;;
+    --proxy)  MODE="proxy"  ;;
+    http*|ws*) BASE_URL="$arg" ;;
+  esac
+done
+
+if [[ -z "$BASE_URL" ]]; then
+  if [[ "$MODE" == "proxy" ]]; then
+    BASE_URL="https://localhost"
+  else
+    BASE_URL="http://localhost:8080"
+  fi
+fi
+
 ADMIN_USER="${ADMIN_USER:-admin}"
 ADMIN_PASS="${ADMIN_PASS:-admin}"
+
+# Extra curl flags: -k for self-signed certs in proxy mode.
+CURL_EXTRA=""
+if [[ "$MODE" == "proxy" ]]; then
+  CURL_EXTRA="-k"
+fi
 
 # ---- colour helpers ----
 RED='\033[0;31m'
@@ -37,12 +74,13 @@ http() {
   local method="$1"; shift
   local path="$1";   shift
   curl -s -o /tmp/sticky_resp -w '%{http_code}' \
+    $CURL_EXTRA \
     -X "$method" "${BASE_URL}${path}" "$@"
 }
 
 token=""
 
-echo "=== sticky-backend API tests: $BASE_URL ==="
+echo "=== sticky-backend API tests: $BASE_URL (mode: $MODE) ==="
 echo
 
 # 1. Health check (/api/health)
@@ -124,12 +162,12 @@ else
   fail "8. POST /api/subscriptions/chaturbate/testuser/pause → $status (expected 200)"
 fi
 
-# 9. GET /api/config without auth → 401
+# 9. GET /api/config without auth → 401 (direct) or 403 (proxy — missing JWT)
 status=$(http GET /api/config)
-if [[ "$status" == "401" ]]; then
-  ok "9. GET /api/config (no auth) → 401"
+if [[ "$status" == "401" || "$status" == "403" ]]; then
+  ok "9. GET /api/config (no auth) → $status"
 else
-  fail "9. GET /api/config (no auth) → $status (expected 401)"
+  fail "9. GET /api/config (no auth) → $status (expected 401 or 403)"
 fi
 
 # 10. GET /api/config with admin token → 200

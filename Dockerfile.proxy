@@ -1,11 +1,15 @@
 FROM nginx:1.27-alpine
 
-# Install the NGINX NJS module for JavaScript-based JWT validation.
-RUN apk add --no-cache nginx-mod-http-js
+# NJS module (.so) is already bundled in the official nginx:1.27-alpine image at
+# /usr/lib/nginx/modules/ngx_http_js_module.so — no apk install needed.
 
-# Load the NJS dynamic module.
-RUN printf 'load_module modules/ngx_http_js_module.so;\n' \
+# Load the NJS dynamic module (must appear before events/http blocks in nginx.conf).
+RUN printf 'load_module /usr/lib/nginx/modules/ngx_http_js_module.so;\n' \
     > /etc/nginx/modules/njs.conf
+
+# Expose JWT_SECRET env var so NJS can read it via process.env.JWT_SECRET.
+# The env directive must be in the main nginx.conf context, not conf.d.
+RUN sed -i '1i env JWT_SECRET;' /etc/nginx/nginx.conf
 
 # NJS script directory
 RUN mkdir -p /etc/nginx/njs

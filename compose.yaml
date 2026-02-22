@@ -45,6 +45,7 @@ services:
       DB_DSN: postgres://sticky:changeme@postgres:5432/sticky?sslmode=disable
       JWT_SECRET: change-me-in-production
       OVERSEER_URL: ws://overseer:8080/ws
+      CONVERTER_URL: ws://converter:8080/ws
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: admin  # Change this for production deployments
 
@@ -68,6 +69,12 @@ services:
       #   openssl req -x509 -newkey rsa:4096 -nodes -days 365 \
       #     -keyout certs/tls.key -out certs/tls.crt -subj '/CN=localhost'
       - ./certs:/etc/nginx/certs:ro
+
+  # converter:
+  #   image: sticky-converter:latest
+  #   restart: unless-stopped
+  #   # WebSocket API at /ws (sticky-overseer v2 protocol)
+  #   # backend connects via CONVERTER_URL: ws://converter:8080/ws
 
 volumes:
   postgres_data:

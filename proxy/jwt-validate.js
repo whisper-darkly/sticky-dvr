@@ -1,6 +1,7 @@
 // jwt-validate.js — NGINX NJS JWT validation (HS256)
 // Validates Authorization: Bearer <token> header using JWT_SECRET env var.
-// Sets r.headersOut['X-User-Id'] and r.headersOut['X-User-Role'] on success.
+// Sets r.variables.jwt_user_id and r.variables.jwt_user_role on success
+// (declared as js_var in proxy.conf; forwarded to backend as X-User-Id / X-User-Role).
 // Returns 403 on missing/invalid/expired token.
 
 // Paths that bypass JWT validation entirely.
@@ -95,9 +96,9 @@ function validateJwt(r) {
     return;
   }
 
-  // Inject user headers for backend to trust
-  r.headersOut['X-User-Id']   = String(payload.sub  || '');
-  r.headersOut['X-User-Role'] = String(payload.role || 'user');
+  // Set NJS variables (declared as js_var in proxy.conf); nginx forwards them as headers.
+  r.variables.jwt_user_id   = String(payload.sub  || '');
+  r.variables.jwt_user_role = String(payload.role || 'user');
 
   r.internalRedirect('@backend');
 }
