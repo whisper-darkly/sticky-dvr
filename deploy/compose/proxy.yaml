@@ -1,0 +1,24 @@
+# sticky-dvr — Proxy (NGINX + JWT validation)
+# Public-facing entry point.  Exposes ports 80 and 443.
+# Requires TLS certs at ${CERTS_DIR}/tls.crt and ${CERTS_DIR}/tls.key.
+#
+# Usage:
+#   docker compose -f deploy/compose/proxy.yaml --env-file deploy/.env up -d
+
+services:
+  proxy:
+    image: sticky-proxy:latest
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - ${CERTS_DIR}:/etc/nginx/certs:ro
+    networks:
+      - sticky-dvr
+
+networks:
+  sticky-dvr:
+    external: true

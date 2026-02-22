@@ -1,4 +1,4 @@
-# sticky-recorder overseer config for POC
+# sticky-recorder overseer config — production
 # Mounted at: /etc/sticky-overseer/config.yaml inside the overseer container
 
 name: "sticky-recorder"
