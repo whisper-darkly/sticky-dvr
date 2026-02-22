@@ -951,6 +951,70 @@ func (m *Manager) GetSourceSubscribers(ctx context.Context, driver, username str
 	return m.st.GetSourceSubscribers(ctx, src.ID)
 }
 
+// RestartAll stops every tracked source that has at least one active subscriber and
+// restarts it with fresh configuration. Sources in "errored" state are skipped unless
+// includeErrored is true. Returns counts of restarted and skipped sources.
+func (m *Manager) RestartAll(ctx context.Context, includeErrored bool) (restarted, skipped int) {
+	m.mu.RLock()
+	ids := make([]int64, 0, len(m.states))
+	for id := range m.states {
+		ids = append(ids, id)
+	}
+	m.mu.RUnlock()
+
+	for _, id := range ids {
+		state := m.stateByID(id)
+		if state == nil {
+			continue
+		}
+
+		// Only restart sources that have at least one active subscriber.
+		count, err := m.st.GetSourceActiveSubscriberCount(ctx, id)
+		if err != nil || count == 0 {
+			skipped++
+			continue
+		}
+
+		state.mu.Lock()
+		wsState := state.workerState
+		taskID := state.source.OverseerTaskID
+		state.mu.Unlock()
+
+		// Skip errored sources unless the caller asked to include them.
+		if wsState == "errored" && !includeErrored {
+			skipped++
+			continue
+		}
+
+		// Stop the current task, clear its ID, then start fresh so the worker
+		// picks up the latest configuration (cookies, user_agent, etc.).
+		if taskID != "" {
+			_ = m.oc.Stop(taskID)
+			if dbErr := m.st.SetSourceTaskID(ctx, id, ""); dbErr != nil {
+				log.Printf("manager: restart-all: clear task_id source=%d: %v", id, dbErr)
+			}
+			m.mu.Lock()
+			delete(m.taskIdx, taskID)
+			m.mu.Unlock()
+			state.mu.Lock()
+			state.source.OverseerTaskID = ""
+			state.mu.Unlock()
+		}
+
+		state.mu.Lock()
+		state.workerState = "starting"
+		state.errorMessage = ""
+		state.sessionActive = false
+		state.recordingState = ""
+		state.mu.Unlock()
+		state.addLog("[system] restarting (restart-all — applying current configuration)")
+
+		go m.startWorker(id)
+		restarted++
+	}
+	return
+}
+
 // OnConnected is called each time the overseer WebSocket connection is established.
 // It re-subscribes to all tracked tasks so that task-specific events (output,
 // started, exited, etc.) are received after reconnects.

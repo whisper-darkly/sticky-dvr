@@ -94,6 +94,10 @@ func New(d Deps) http.Handler {
 	mux.Handle("POST /api/admin/subscriptions/{sub_id}/reset-error",
 		requireAuth(requireAdmin(http.HandlerFunc(adminResetError(d)))))
 
+	// ---- admin: bulk source operations ----
+	mux.Handle("POST /api/admin/sources/restart-all",
+		requireAuth(requireAdmin(http.HandlerFunc(adminRestartAllSources(d)))))
+
 	// ---- admin: source subscribers + user subscriptions ----
 	mux.Handle("GET /api/admin/sources/{driver}/{username}/subscribers",
 		requireAuth(requireAdmin(http.HandlerFunc(adminGetSourceSubscribers(d)))))
@@ -919,6 +923,23 @@ func adminResetError(d Deps) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, status)
+	}
+}
+
+func adminRestartAllSources(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			IncludeErrored bool `json:"include_errored"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && r.ContentLength > 0 {
+			writeError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		restarted, skipped := d.Manager.RestartAll(r.Context(), body.IncludeErrored)
+		writeJSON(w, http.StatusOK, map[string]int{
+			"restarted": restarted,
+			"skipped":   skipped,
+		})
 	}
 }
 

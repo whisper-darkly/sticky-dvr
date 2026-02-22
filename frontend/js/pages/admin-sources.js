@@ -15,11 +15,47 @@ export async function render(container) {
         <div class="page-title">All Sources</div>
         <div class="page-subtitle">All subscriptions across all users</div>
       </div>
-      <button class="btn btn-ghost" id="src-refresh">Refresh</button>
+      <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:.35rem;font-size:.875rem;cursor:pointer;white-space:nowrap">
+          <input type="checkbox" id="restart-include-errored" />
+          Include Errored
+        </label>
+        <button class="btn btn-warning btn-sm" id="src-restart-all">Restart All Sources</button>
+        <button class="btn btn-ghost" id="src-refresh">Refresh</button>
+      </div>
     </div>
+    <div id="restart-status" style="margin-bottom:.75rem"></div>
     <div id="sources-content"><div class="loading-wrap"><span class="spinner"></span> Loading…</div></div>`;
 
   container.querySelector('#src-refresh').onclick = load;
+
+  container.querySelector('#src-restart-all').onclick = () => {
+    const includeErrored = container.querySelector('#restart-include-errored').checked;
+    const scope = includeErrored ? 'active and errored' : 'active';
+    showModal({
+      title: 'Restart All Sources?',
+      body: `Stop and re-submit all ${scope} sources with the current configuration. In-progress recordings will be interrupted. Continue?`,
+      confirmLabel: 'Restart All',
+      confirmClass: 'btn-warning',
+      onConfirm: () => restartAll(includeErrored),
+    });
+  };
+
+  async function restartAll(includeErrored) {
+    const statusEl = document.getElementById('restart-status');
+    const btn = container.querySelector('#src-restart-all');
+    btn.disabled = true;
+    statusEl.innerHTML = '<div class="alert" style="background:var(--bg-card);border:1px solid var(--border)"><span class="spinner"></span> Restarting sources…</div>';
+    try {
+      const result = await api.adminRestartAllSources(includeErrored);
+      statusEl.innerHTML = `<div class="alert alert-success">Restarted ${result.restarted} source${result.restarted !== 1 ? 's' : ''}${result.skipped ? ` · ${result.skipped} skipped` : ''}.</div>`;
+      await load();
+    } catch (err) {
+      statusEl.innerHTML = `<div class="alert alert-error">Restart failed: ${escape(err.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+    }
+  }
 
   let _allSubs = [];
 
