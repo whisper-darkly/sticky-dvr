@@ -37,6 +37,10 @@ type Data struct {
 	ReconcileInterval string `json:"reconcile_interval" yaml:"reconcile_interval"`
 	ErrorThreshold    int    `json:"error_threshold"    yaml:"error_threshold"`
 	ErrorWindow       string `json:"error_window"       yaml:"error_window"`
+
+	// DriverURLs maps driver names to URL templates.
+	// Use {{.Username}} as the performer name placeholder.
+	DriverURLs map[string]string `json:"driver_urls" yaml:"driver_urls"`
 }
 
 // ConfigStore is the persistence interface for the live config row.

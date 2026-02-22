@@ -254,6 +254,24 @@ func (d *DB) GetSourceByKey(ctx context.Context, driver, username string) (*stor
 	return &s, nil
 }
 
+func (d *DB) GetSourceByID(ctx context.Context, id int64) (*store.Source, error) {
+	var s store.Source
+	var taskID *string
+	err := d.pool.QueryRow(ctx,
+		`SELECT id, driver, username, overseer_task_id, created_at FROM sources WHERE id = $1`, id,
+	).Scan(&s.ID, &s.Driver, &s.Username, &taskID, &s.CreatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if taskID != nil {
+		s.OverseerTaskID = *taskID
+	}
+	return &s, nil
+}
+
 func (d *DB) ListSources(ctx context.Context) ([]*store.Source, error) {
 	rows, err := d.pool.Query(ctx,
 		`SELECT id, driver, username, overseer_task_id, created_at FROM sources ORDER BY driver, username`)
@@ -336,6 +354,41 @@ func (d *DB) SetPosture(ctx context.Context, id int64, posture store.Posture) er
 	_, err := d.pool.Exec(ctx,
 		`UPDATE subscriptions SET posture = $2, updated_at = now() WHERE id = $1`, id, string(posture))
 	return err
+}
+
+func (d *DB) GetSubscriptionByID(ctx context.Context, id int64) (*store.Subscription, error) {
+	var sub store.Subscription
+	err := d.pool.QueryRow(ctx, `
+		SELECT id, user_id, source_id, posture, created_at, updated_at
+		FROM subscriptions WHERE id = $1
+	`, id).Scan(&sub.ID, &sub.UserID, &sub.SourceID, &sub.Posture, &sub.CreatedAt, &sub.UpdatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	return &sub, err
+}
+
+func (d *DB) GetSourceSubscribers(ctx context.Context, sourceID int64) ([]*store.SubscriberInfo, error) {
+	rows, err := d.pool.Query(ctx, `
+		SELECT u.id, u.username, s.id, s.posture
+		FROM subscriptions s
+		JOIN users u ON u.id = s.user_id
+		WHERE s.source_id = $1
+		ORDER BY s.id
+	`, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []*store.SubscriberInfo
+	for rows.Next() {
+		var si store.SubscriberInfo
+		if err := rows.Scan(&si.UserID, &si.Username, &si.SubID, &si.Posture); err != nil {
+			return nil, err
+		}
+		result = append(result, &si)
+	}
+	return result, rows.Err()
 }
 
 func (d *DB) GetSourceActiveSubscriberCount(ctx context.Context, sourceID int64) (int, error) {

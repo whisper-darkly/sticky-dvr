@@ -12,8 +12,10 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +35,15 @@ type sourceState struct {
 	workerState  string
 	errorMessage string
 	logs         []string
+	// Recording-level state derived from recorder JSON output events.
+	recordingState  string    // recording | sleeping | idle
+	sessionDuration string    // last known session duration from HEARTBEAT
+	lastHeartbeat   time.Time // time of last HEARTBEAT event
+	lastRecordingAt time.Time // time of the most recent RECORDING START event
+	// sessionActive is true from the first RECORDING START until SESSION END or process exit.
+	// Unlike recordingState, it stays true through segment boundaries (RECORDING END → RECORDING START)
+	// and SLEEP events, so the UI can show the source as "in session" without debounce logic.
+	sessionActive bool
 }
 
 func (s *sourceState) addLog(line string) {
@@ -72,6 +83,18 @@ type SubscriptionStatus struct {
 	PID          int      `json:"pid,omitempty"`
 	ErrorMessage string   `json:"error_message,omitempty"`
 	Logs         []string `json:"logs"`
+
+	// Recording-level state derived from recorder JSON output events.
+	RecordingState  string     `json:"recording_state,omitempty"`  // recording | sleeping | idle
+	SessionDuration string     `json:"session_duration,omitempty"`
+	LastHeartbeat   time.Time  `json:"last_heartbeat,omitempty"`
+	LastRecordingAt *time.Time `json:"last_recording_at,omitempty"`
+	// SessionActive is true from RECORDING START until SESSION END or process exit.
+	// Stays true through segment boundaries and SLEEP — use this for "in session" UI logic.
+	SessionActive bool `json:"session_active"`
+
+	// Derived fields
+	CanonicalURL string `json:"canonical_url,omitempty"`
 }
 
 // Manager orchestrates source workers.
@@ -192,6 +215,12 @@ func (m *Manager) reconcileStartup(ctx context.Context) {
 				state.mu.Unlock()
 				log.Printf("manager: claimed existing task=%s pid=%d for %s/%s", taskID, t.CurrentPID, driver, username)
 				state.addLog(fmt.Sprintf("[system] claimed existing worker task=%s pid=%d", taskID, t.CurrentPID))
+				// Subscribe to task-specific events: the overseer only broadcasts
+				// output/started/exited to subscribed clients; claiming via List is
+				// not enough. Ignore errors — reconnect will retry via OnConnected.
+				if err := m.oc.Subscribe(taskID); err != nil {
+					log.Printf("manager: subscribe task=%s: %v", taskID, err)
+				}
 				continue
 			}
 		}
@@ -229,18 +258,62 @@ func (m *Manager) OnStarted(taskID string, pid int, restartOf int, ts time.Time)
 	}
 }
 
-// OnOutput routes a stdout/stderr line to the source's log buffer.
+// OnOutput routes a stdout/stderr line to the source's log buffer,
+// and parses JSON recorder events to update recording-level state.
 func (m *Manager) OnOutput(taskID string, pid int, stream, data string, ts time.Time) {
 	sourceID := m.sourceIDByTask(taskID)
 	if sourceID == 0 {
 		return
 	}
-	state := m.stateByID(sourceID)
-	if state == nil {
+	stateObj := m.stateByID(sourceID)
+	if stateObj == nil {
 		return
 	}
-	state.addLog(fmt.Sprintf("[%s] %s", stream, data))
+	stateObj.addLog(fmt.Sprintf("[%s] %s", stream, data))
+
+	// Parse JSON recorder events to derive recording state.
+	var ev map[string]string
+	if err := json.Unmarshal([]byte(data), &ev); err != nil {
+		// Non-JSON output — log it so it's visible in docker logs.
+		log.Printf("recorder [%s/%s] pid=%d %s: %s",
+			stateObj.source.Driver, stateObj.source.Username, pid, stream, data)
+		return
+	}
+	event := ev["event"]
+
+	// Log all recorder events except HEARTBEAT (too frequent) to stdout.
+	if event != "" && event != "HEARTBEAT" {
+		log.Printf("recorder [%s/%s] pid=%d event=%q %v",
+			stateObj.source.Driver, stateObj.source.Username, pid, event, ev)
+	}
+
+	stateObj.mu.Lock()
+	defer stateObj.mu.Unlock()
+
+	switch event {
+	case "RECORDING START":
+		stateObj.recordingState = "recording"
+		stateObj.lastRecordingAt = ts
+		stateObj.sessionActive = true
+	case "RECORDING END":
+		stateObj.recordingState = "idle"
+		// sessionActive stays true — segment boundary, not session end
+	case "SLEEP":
+		stateObj.recordingState = "sleeping"
+		// sessionActive stays true — source went offline, session may resume
+	case "SESSION END":
+		stateObj.recordingState = "idle"
+		stateObj.sessionActive = false
+	case "HEARTBEAT":
+		stateObj.recordingState = "recording"
+		stateObj.lastHeartbeat = ts
+		stateObj.sessionActive = true
+		if d, ok := ev["session_duration"]; ok {
+			stateObj.sessionDuration = d
+		}
+	}
 }
+
 
 // OnExited handles process exit.
 func (m *Manager) OnExited(taskID string, pid int, exitCode int, intentional bool, ts time.Time) {
@@ -260,12 +333,27 @@ func (m *Manager) OnExited(taskID string, pid int, exitCode int, intentional boo
 	if state.workerState == "running" {
 		state.workerState = "idle"
 	}
+	state.recordingState = ""
+	state.sessionActive = false
 	driver := state.source.Driver
 	username := state.source.Username
 	state.mu.Unlock()
 
 	state.addLog(fmt.Sprintf("[system] process pid=%d exited (code=%d intentional=%v)", pid, exitCode, intentional))
 	log.Printf("manager: worker pid=%d exited for %s/%s (code=%d intentional=%v)", pid, driver, username, exitCode, intentional)
+
+	// On unexpected non-zero exit, dump the last few log lines for context.
+	if exitCode != 0 && !intentional {
+		logs := state.getLogs()
+		start := len(logs) - 8
+		if start < 0 {
+			start = 0
+		}
+		log.Printf("manager: last %d log lines for %s/%s pid=%d:", len(logs)-start, driver, username, pid)
+		for _, l := range logs[start:] {
+			log.Printf("manager:   %s", l)
+		}
+	}
 
 	et := store.EventExited
 	if err := m.st.RecordWorkerEvent(context.Background(), sourceID, pid, et, &exitCode); err != nil {
@@ -343,8 +431,42 @@ func (m *Manager) startWorker(sourceID int64) {
 	ctx, cancel := context.WithTimeout(m.ctx, 20*time.Second)
 	defer cancel()
 
-	gotTaskID, pid, err := m.oc.Start(ctx, taskID, src.Driver,
-		map[string]string{"source": src.Username}, rp)
+	segLen := g.SegmentLength
+	if segLen == "" {
+		segLen = "0"
+	}
+	params := map[string]string{
+		"source":             src.Username,
+		"out":                g.OutPattern,
+		"segment_length":     segLen,
+		"check_interval":     g.CheckInterval,
+		"resolution":         fmt.Sprintf("%d", g.Resolution),
+		"framerate":          fmt.Sprintf("%d", g.Framerate),
+		"cookies":            g.Cookies,
+		"user_agent":         g.UserAgent,
+		"heartbeat_interval": "30s",
+	}
+	gotTaskID, pid, err := m.oc.Start(ctx, taskID, src.Driver, params, rp)
+	if err != nil && taskID != "" && strings.Contains(err.Error(), "already running") {
+		// Overseer task is still in active state (race between stop and start).
+		// Force-stop it and start a fresh task with a new ID.
+		log.Printf("manager: task=%s still active at overseer, clearing and restarting %s/%s", taskID, src.Driver, src.Username)
+		_ = m.oc.Stop(taskID)
+		if dbErr := m.st.SetSourceTaskID(context.Background(), sourceID, ""); dbErr != nil {
+			log.Printf("manager: clear task_id source=%d: %v", sourceID, dbErr)
+		}
+		m.mu.Lock()
+		delete(m.taskIdx, taskID)
+		m.mu.Unlock()
+		state.mu.Lock()
+		state.source.OverseerTaskID = ""
+		state.mu.Unlock()
+		taskID = ""
+
+		retryCtx, retryCancel := context.WithTimeout(m.ctx, 20*time.Second)
+		defer retryCancel()
+		gotTaskID, pid, err = m.oc.Start(retryCtx, "", src.Driver, params, rp)
+	}
 	if err != nil {
 		log.Printf("manager: start worker for %s/%s: %v", src.Driver, src.Username, err)
 		state.addLog(fmt.Sprintf("[system] start failed: %v", err))
@@ -530,6 +652,9 @@ func (m *Manager) Archive(ctx context.Context, userID int64, driver, username st
 }
 
 // ResetError clears overseer errored state and restarts the worker.
+// The old task is stopped and its ID cleared so startWorker creates a new task
+// with the current configuration (cookies, user_agent, etc.) rather than the
+// params that were originally stored in the overseer at task creation time.
 func (m *Manager) ResetError(ctx context.Context, userID int64, driver, username string) (*SubscriptionStatus, error) {
 	src, sub, err := m.lookupSub(ctx, userID, driver, username)
 	if err != nil {
@@ -550,21 +675,28 @@ func (m *Manager) ResetError(ctx context.Context, userID int64, driver, username
 		return nil, fmt.Errorf("source %s/%s is not in errored state", driver, username)
 	}
 
+	// Stop the current task and clear its ID so startWorker creates a brand-new
+	// task that picks up the latest configuration values.
 	if taskID != "" {
-		resetCtx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
-		defer cancel()
-		if _, err := m.oc.Reset(resetCtx, taskID); err != nil {
-			return nil, fmt.Errorf("overseer reset: %w", err)
+		_ = m.oc.Stop(taskID)
+		if dbErr := m.st.SetSourceTaskID(context.Background(), src.ID, ""); dbErr != nil {
+			log.Printf("manager: clear task_id source=%d: %v", src.ID, dbErr)
 		}
-	} else {
-		go m.startWorker(src.ID)
+		m.mu.Lock()
+		delete(m.taskIdx, taskID)
+		m.mu.Unlock()
+		state.mu.Lock()
+		state.source.OverseerTaskID = ""
+		state.mu.Unlock()
 	}
 
 	state.mu.Lock()
 	state.workerState = "starting"
 	state.errorMessage = ""
 	state.mu.Unlock()
-	state.addLog("[system] reset — restarting worker")
+	state.addLog("[system] reset — restarting worker with current configuration")
+
+	go m.startWorker(src.ID)
 
 	return m.statusFor(src, sub), nil
 }
@@ -645,6 +777,199 @@ func (m *Manager) GetWorkerEvents(ctx context.Context, userID int64, isAdmin boo
 		}
 	}
 	return m.st.RecentWorkerEvents(ctx, src.ID, limit)
+}
+
+// ---- admin helpers ----
+
+// lookupSubByID fetches a subscription by its ID along with the parent source.
+func (m *Manager) lookupSubByID(ctx context.Context, subID int64) (*store.Source, *store.Subscription, error) {
+	sub, err := m.st.GetSubscriptionByID(ctx, subID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if sub == nil {
+		return nil, nil, fmt.Errorf("subscription %d not found", subID)
+	}
+	src, err := m.st.GetSourceByID(ctx, sub.SourceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if src == nil {
+		return nil, nil, fmt.Errorf("source for subscription %d not found", subID)
+	}
+	return src, sub, nil
+}
+
+// AdminPause pauses any subscription by its ID (admin only).
+func (m *Manager) AdminPause(ctx context.Context, subID int64) (*SubscriptionStatus, error) {
+	src, sub, err := m.lookupSubByID(ctx, subID)
+	if err != nil {
+		return nil, err
+	}
+	if sub.Posture == store.PosturePaused {
+		return m.statusFor(src, sub), nil
+	}
+	if err := m.st.SetPosture(ctx, sub.ID, store.PosturePaused); err != nil {
+		return nil, err
+	}
+	sub.Posture = store.PosturePaused
+	count, err := m.st.GetSourceActiveSubscriberCount(ctx, src.ID)
+	if err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		if state := m.stateByID(src.ID); state != nil {
+			m.stopWorker(state)
+		}
+	}
+	return m.statusFor(src, sub), nil
+}
+
+// AdminResume resumes any subscription by its ID (admin only).
+func (m *Manager) AdminResume(ctx context.Context, subID int64) (*SubscriptionStatus, error) {
+	src, sub, err := m.lookupSubByID(ctx, subID)
+	if err != nil {
+		return nil, err
+	}
+	if sub.Posture == store.PostureActive {
+		return m.statusFor(src, sub), nil
+	}
+	if err := m.st.SetPosture(ctx, sub.ID, store.PostureActive); err != nil {
+		return nil, err
+	}
+	sub.Posture = store.PostureActive
+
+	// Ensure source has in-memory state.
+	m.mu.Lock()
+	if _, exists := m.states[src.ID]; !exists {
+		m.states[src.ID] = &sourceState{source: src, workerState: "idle"}
+		if src.OverseerTaskID != "" {
+			m.taskIdx[src.OverseerTaskID] = src.ID
+		}
+	}
+	m.mu.Unlock()
+
+	count, err := m.st.GetSourceActiveSubscriberCount(ctx, src.ID)
+	if err != nil {
+		return nil, err
+	}
+	if count == 1 {
+		go m.startWorker(src.ID)
+	}
+	return m.statusFor(src, sub), nil
+}
+
+// AdminArchive archives any subscription by its ID (admin only).
+func (m *Manager) AdminArchive(ctx context.Context, subID int64) (*SubscriptionStatus, error) {
+	src, sub, err := m.lookupSubByID(ctx, subID)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.st.SetPosture(ctx, sub.ID, store.PostureArchived); err != nil {
+		return nil, err
+	}
+	sub.Posture = store.PostureArchived
+	count, err := m.st.GetSourceActiveSubscriberCount(ctx, src.ID)
+	if err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		if state := m.stateByID(src.ID); state != nil {
+			m.stopWorker(state)
+		}
+	}
+	return m.statusFor(src, sub), nil
+}
+
+// AdminUnsubscribe deletes any subscription by its ID (admin only).
+func (m *Manager) AdminUnsubscribe(ctx context.Context, subID int64) error {
+	src, sub, err := m.lookupSubByID(ctx, subID)
+	if err != nil {
+		return err
+	}
+	if err := m.st.SetPosture(ctx, sub.ID, store.PostureArchived); err != nil {
+		return err
+	}
+	count, err := m.st.GetSourceActiveSubscriberCount(ctx, src.ID)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		if state := m.stateByID(src.ID); state != nil {
+			m.stopWorker(state)
+		}
+	}
+	return nil
+}
+
+// AdminResetError clears errored state for any subscription by its ID (admin only).
+// Same stop+clear+restart approach as ResetError to ensure fresh config params are used.
+func (m *Manager) AdminResetError(ctx context.Context, subID int64) (*SubscriptionStatus, error) {
+	src, sub, err := m.lookupSubByID(ctx, subID)
+	if err != nil {
+		return nil, err
+	}
+	state := m.stateByID(src.ID)
+	if state == nil {
+		return nil, fmt.Errorf("source %s/%s not tracked", src.Driver, src.Username)
+	}
+	state.mu.Lock()
+	taskID := state.source.OverseerTaskID
+	wsState := state.workerState
+	state.mu.Unlock()
+	if wsState != "errored" {
+		return nil, fmt.Errorf("source %s/%s is not in errored state", src.Driver, src.Username)
+	}
+	// Stop old task, clear ID, let startWorker create a fresh task with current config.
+	if taskID != "" {
+		_ = m.oc.Stop(taskID)
+		if dbErr := m.st.SetSourceTaskID(context.Background(), src.ID, ""); dbErr != nil {
+			log.Printf("manager: clear task_id source=%d: %v", src.ID, dbErr)
+		}
+		m.mu.Lock()
+		delete(m.taskIdx, taskID)
+		m.mu.Unlock()
+		state.mu.Lock()
+		state.source.OverseerTaskID = ""
+		state.mu.Unlock()
+	}
+	state.mu.Lock()
+	state.workerState = "starting"
+	state.errorMessage = ""
+	state.mu.Unlock()
+	state.addLog("[system] reset — restarting worker with current configuration")
+	go m.startWorker(src.ID)
+	return m.statusFor(src, sub), nil
+}
+
+// GetSourceSubscribers returns subscriber info for all users subscribed to a source.
+func (m *Manager) GetSourceSubscribers(ctx context.Context, driver, username string) ([]*store.SubscriberInfo, error) {
+	src, err := m.st.GetSourceByKey(ctx, driver, username)
+	if err != nil || src == nil {
+		return nil, fmt.Errorf("source %s/%s not found", driver, username)
+	}
+	return m.st.GetSourceSubscribers(ctx, src.ID)
+}
+
+// OnConnected is called each time the overseer WebSocket connection is established.
+// It re-subscribes to all tracked tasks so that task-specific events (output,
+// started, exited, etc.) are received after reconnects.
+func (m *Manager) OnConnected() {
+	m.mu.RLock()
+	taskIDs := make([]string, 0, len(m.taskIdx))
+	for taskID := range m.taskIdx {
+		taskIDs = append(taskIDs, taskID)
+	}
+	m.mu.RUnlock()
+
+	for _, taskID := range taskIDs {
+		if err := m.oc.Subscribe(taskID); err != nil {
+			log.Printf("manager: resubscribe task=%s: %v", taskID, err)
+		}
+	}
+	if len(taskIDs) > 0 {
+		log.Printf("manager: re-subscribed to %d task(s) after overseer connect", len(taskIDs))
+	}
 }
 
 func (m *Manager) GetConfig() config.Data        { return m.cfg.Get() }
@@ -781,7 +1106,20 @@ func (m *Manager) statusFor(src *store.Source, sub *store.Subscription) *Subscri
 	s.ErrorMessage = state.errorMessage
 	s.Logs = make([]string, len(state.logs))
 	copy(s.Logs, state.logs)
+	s.RecordingState = state.recordingState
+	s.SessionDuration = state.sessionDuration
+	s.LastHeartbeat = state.lastHeartbeat
+	s.SessionActive = state.sessionActive
+	if !state.lastRecordingAt.IsZero() {
+		t := state.lastRecordingAt
+		s.LastRecordingAt = &t
+	}
 	state.mu.Unlock()
+
+	// Populate canonical URL from config driver_urls.
+	if tmpl := m.cfg.Get().DriverURLs[src.Driver]; tmpl != "" {
+		s.CanonicalURL = strings.ReplaceAll(tmpl, "{{.Username}}", src.Username)
+	}
 
 	return s
 }

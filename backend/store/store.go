@@ -63,6 +63,14 @@ type Source struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+// SubscriberInfo is returned by GetSourceSubscribers.
+type SubscriberInfo struct {
+	UserID   int64   `json:"user_id"`
+	Username string  `json:"username"`
+	SubID    int64   `json:"sub_id"`
+	Posture  Posture `json:"posture"`
+}
+
 type Subscription struct {
 	ID        int64     `json:"id"`
 	UserID    int64     `json:"user_id"`
@@ -102,17 +110,20 @@ type Store interface {
 	// ---- sources ----
 	GetOrCreateSource(ctx context.Context, driver, username string) (*Source, error)
 	GetSourceByKey(ctx context.Context, driver, username string) (*Source, error)
+	GetSourceByID(ctx context.Context, id int64) (*Source, error)
 	ListSources(ctx context.Context) ([]*Source, error)
 	SetSourceTaskID(ctx context.Context, sourceID int64, taskID string) error
 
 	// ---- subscriptions ----
 	CreateSubscription(ctx context.Context, userID, sourceID int64) (*Subscription, error)
 	GetSubscription(ctx context.Context, userID, sourceID int64) (*Subscription, error)
+	GetSubscriptionByID(ctx context.Context, id int64) (*Subscription, error)
 	ListSubscriptionsByUser(ctx context.Context, userID int64) ([]*Subscription, error)
 	ListActiveSubscriptions(ctx context.Context) ([]*Subscription, error)
 	ListAllSubscriptions(ctx context.Context) ([]*Subscription, error)
 	SetPosture(ctx context.Context, id int64, posture Posture) error
 	GetSourceActiveSubscriberCount(ctx context.Context, sourceID int64) (int, error)
+	GetSourceSubscribers(ctx context.Context, sourceID int64) ([]*SubscriberInfo, error)
 
 	// ---- worker events ----
 	RecordWorkerEvent(ctx context.Context, sourceID int64, pid int, eventType EventType, exitCode *int) error

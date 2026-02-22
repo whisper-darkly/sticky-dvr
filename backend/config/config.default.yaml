@@ -2,7 +2,7 @@ resolution: 720
 framerate: 30
 out_pattern: "/data/recordings/{{.Driver}}/{{.Source}}/{{.Session.Year}}-{{.Session.Month}}-{{.Session.Day}}_{{.Session.Hour}}-{{.Session.Minute}}-{{.Session.Second}}/{{.Recording.Year}}-{{.Recording.Month}}-{{.Recording.Day}}_{{.Recording.Hour}}-{{.Recording.Minute}}-{{.Recording.Second}}"
 log_pattern: ""
-segment_length: ""
+segment_length: "5m"
 check_interval: "1m"
 retry_delay: "5s"
 segment_timeout: "5m"
@@ -15,3 +15,6 @@ restart_delay: "30s"
 reconcile_interval: "60s"
 error_threshold: 5
 error_window: "5m"
+driver_urls:
+  chaturbate: "https://chaturbate.com/{{.Username}}/"
+  stripchat: "https://stripchat.com/{{.Username}}"

@@ -7,12 +7,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+// debugLog is set to true when LOG_DEBUG=1; enables verbose overseer message logging.
+var debugLog = os.Getenv("LOG_DEBUG") == "1"
 
 // RetryPolicy mirrors the overseer's RetryPolicy (duration strings).
 type RetryPolicy struct {
@@ -44,24 +48,49 @@ type Handler struct {
 	OnExited     func(taskID string, pid int, exitCode int, intentional bool, ts time.Time)
 	OnRestarting func(taskID string, pid int, attempt int, ts time.Time)
 	OnErrored    func(taskID string, pid int, exitCount int, ts time.Time)
+	// OnConnected is called each time a WebSocket connection to the overseer is established.
+	// Use it to re-subscribe to existing task IDs after reconnect.
+	OnConnected func()
+}
+
+// GlobalMetrics holds aggregate counters from the overseer's in-memory state.
+type GlobalMetrics struct {
+	TasksStarted     int64 `json:"tasks_started"`
+	TasksCompleted   int64 `json:"tasks_completed"`
+	TasksErrored     int64 `json:"tasks_errored"`
+	TasksRestarted   int64 `json:"tasks_restarted"`
+	TotalOutputLines int64 `json:"total_output_lines"`
+	Enqueued         int64 `json:"enqueued"`
+	Dequeued         int64 `json:"dequeued"`
+	Displaced        int64 `json:"displaced"`
+	Expired          int64 `json:"expired"`
+}
+
+// PoolInfo holds a point-in-time snapshot of the overseer pool state.
+type PoolInfo struct {
+	Limit      int `json:"limit"`
+	Running    int `json:"running"`
+	QueueDepth int `json:"queue_depth"`
 }
 
 // inbound is the superset of all messages sent by the overseer.
 type inbound struct {
-	Type         string     `json:"type"`
-	ID           string     `json:"id,omitempty"`
-	TaskID       string     `json:"task_id,omitempty"`
-	PID          int        `json:"pid,omitempty"`
-	RestartOf    int        `json:"restart_of,omitempty"`
-	Stream       string     `json:"stream,omitempty"`
-	Data         string     `json:"data,omitempty"`
-	ExitCode     int        `json:"exit_code,omitempty"`
-	Intentional  bool       `json:"intentional,omitempty"`
-	ExitCount    int        `json:"exit_count,omitempty"`
-	Attempt      int        `json:"attempt,omitempty"`
-	Message      string     `json:"message,omitempty"`
-	Tasks        []TaskInfo `json:"tasks,omitempty"`
-	TS           time.Time  `json:"ts"`
+	Type         string           `json:"type"`
+	ID           string           `json:"id,omitempty"`
+	TaskID       string           `json:"task_id,omitempty"`
+	PID          int              `json:"pid,omitempty"`
+	RestartOf    int              `json:"restart_of,omitempty"`
+	Stream       string           `json:"stream,omitempty"`
+	Data         string           `json:"data,omitempty"`
+	ExitCode     int              `json:"exit_code,omitempty"`
+	Intentional  bool             `json:"intentional,omitempty"`
+	ExitCount    int              `json:"exit_count,omitempty"`
+	Attempt      int              `json:"attempt,omitempty"`
+	Message      string           `json:"message,omitempty"`
+	Tasks        []TaskInfo       `json:"tasks,omitempty"`
+	Global       *json.RawMessage `json:"global,omitempty"`
+	Pool         *json.RawMessage `json:"pool,omitempty"`
+	TS           time.Time        `json:"ts"`
 }
 
 type startResult struct {
@@ -79,8 +108,10 @@ type Client struct {
 	conn    *websocket.Conn
 	writeMu sync.Mutex
 
-	startPending sync.Map // request id → chan startResult
-	listPending  sync.Map // request id → chan []TaskInfo
+	startPending   sync.Map // request id → chan startResult
+	listPending    sync.Map // request id → chan []TaskInfo
+	metricsPending sync.Map // request id → chan *GlobalMetrics
+	poolPending    sync.Map // request id → chan *PoolInfo
 
 	idSeq          atomic.Int64
 	reconnectDelay time.Duration
@@ -131,6 +162,11 @@ func (c *Client) connect(ctx context.Context) error {
 
 	log.Printf("overseer: connected to %s", c.url)
 
+	// Notify the handler so it can re-subscribe to any claimed tasks.
+	if c.handler.OnConnected != nil {
+		go c.handler.OnConnected()
+	}
+
 	defer func() {
 		conn.Close()
 		c.connMu.Lock()
@@ -147,6 +183,16 @@ func (c *Client) connect(ctx context.Context) error {
 		c.listPending.Range(func(k, v any) bool {
 			v.(chan []TaskInfo) <- nil
 			c.listPending.Delete(k)
+			return true
+		})
+		c.metricsPending.Range(func(k, v any) bool {
+			v.(chan *GlobalMetrics) <- nil
+			c.metricsPending.Delete(k)
+			return true
+		})
+		c.poolPending.Range(func(k, v any) bool {
+			v.(chan *PoolInfo) <- nil
+			c.poolPending.Delete(k)
 			return true
 		})
 
@@ -174,6 +220,12 @@ func (c *Client) dispatch(raw []byte) {
 		return
 	}
 
+	if debugLog && msg.Type != "output" {
+		// Log all non-output events when debug mode is enabled (output is too frequent).
+		log.Printf("overseer: recv type=%q task_id=%q pid=%d exit_code=%d intentional=%v",
+			msg.Type, msg.TaskID, msg.PID, msg.ExitCode, msg.Intentional)
+	}
+
 	switch msg.Type {
 	case "started":
 		if msg.ID != "" {
@@ -191,6 +243,30 @@ func (c *Client) dispatch(raw []byte) {
 			ch.(chan []TaskInfo) <- msg.Tasks
 		}
 
+	case "metrics":
+		if ch, ok := c.metricsPending.LoadAndDelete(msg.ID); ok {
+			if msg.Global != nil {
+				var gm GlobalMetrics
+				if err := json.Unmarshal(*msg.Global, &gm); err == nil {
+					ch.(chan *GlobalMetrics) <- &gm
+					return
+				}
+			}
+			ch.(chan *GlobalMetrics) <- nil
+		}
+
+	case "pool_info":
+		if ch, ok := c.poolPending.LoadAndDelete(msg.ID); ok {
+			if msg.Pool != nil {
+				var pi PoolInfo
+				if err := json.Unmarshal(*msg.Pool, &pi); err == nil {
+					ch.(chan *PoolInfo) <- &pi
+					return
+				}
+			}
+			ch.(chan *PoolInfo) <- nil
+		}
+
 	case "error":
 		if msg.ID != "" {
 			if ch, ok := c.startPending.LoadAndDelete(msg.ID); ok {
@@ -199,6 +275,12 @@ func (c *Client) dispatch(raw []byte) {
 			}
 			if ch, ok := c.listPending.LoadAndDelete(msg.ID); ok {
 				ch.(chan []TaskInfo) <- nil
+			}
+			if ch, ok := c.metricsPending.LoadAndDelete(msg.ID); ok {
+				ch.(chan *GlobalMetrics) <- nil
+			}
+			if ch, ok := c.poolPending.LoadAndDelete(msg.ID); ok {
+				ch.(chan *PoolInfo) <- nil
 			}
 		}
 
@@ -221,6 +303,9 @@ func (c *Client) dispatch(raw []byte) {
 		if c.handler.OnErrored != nil {
 			c.handler.OnErrored(msg.TaskID, msg.PID, msg.ExitCount, msg.TS)
 		}
+
+	case "subscribed", "unsubscribed":
+		// Acknowledgement only — no action needed.
 	}
 }
 
@@ -279,6 +364,18 @@ func (c *Client) Start(ctx context.Context, taskID string, action string, params
 	}
 }
 
+// Subscribe registers this client as a subscriber for task-specific events (output,
+// started, exited, restarting, errored) for the given taskID.
+// The overseer only broadcasts task events to subscribed clients, so this must
+// be called after claiming an existing task via List on reconnect.
+func (c *Client) Subscribe(taskID string) error {
+	return c.send(map[string]any{
+		"type":    "subscribe",
+		"id":      c.nextID(),
+		"task_id": taskID,
+	})
+}
+
 // Stop sends a stop command for the given task_id.
 // The overseer does not send a success acknowledgement for stop, so this is
 // fire-and-forget; a correlation ID is included so error responses can be traced.
@@ -316,6 +413,58 @@ func (c *Client) Reset(ctx context.Context, taskID string) (int, error) {
 	case <-time.After(10 * time.Second):
 		c.startPending.Delete(id)
 		return 0, fmt.Errorf("timeout waiting for reset confirmation")
+	}
+}
+
+// Metrics returns global aggregate counters from the overseer.
+func (c *Client) Metrics(ctx context.Context) (*GlobalMetrics, error) {
+	id := c.nextID()
+	ch := make(chan *GlobalMetrics, 1)
+	c.metricsPending.Store(id, ch)
+
+	if err := c.send(map[string]any{"type": "metrics", "id": id}); err != nil {
+		c.metricsPending.Delete(id)
+		return nil, err
+	}
+
+	select {
+	case gm := <-ch:
+		if gm == nil {
+			return nil, fmt.Errorf("metrics request failed or connection lost")
+		}
+		return gm, nil
+	case <-ctx.Done():
+		c.metricsPending.Delete(id)
+		return nil, ctx.Err()
+	case <-time.After(10 * time.Second):
+		c.metricsPending.Delete(id)
+		return nil, fmt.Errorf("timeout waiting for metrics")
+	}
+}
+
+// PoolInfo returns a snapshot of the global pool state (limit, running, queue depth).
+func (c *Client) PoolInfo(ctx context.Context) (*PoolInfo, error) {
+	id := c.nextID()
+	ch := make(chan *PoolInfo, 1)
+	c.poolPending.Store(id, ch)
+
+	if err := c.send(map[string]any{"type": "pool_info", "id": id}); err != nil {
+		c.poolPending.Delete(id)
+		return nil, err
+	}
+
+	select {
+	case pi := <-ch:
+		if pi == nil {
+			return nil, fmt.Errorf("pool_info request failed or connection lost")
+		}
+		return pi, nil
+	case <-ctx.Done():
+		c.poolPending.Delete(id)
+		return nil, ctx.Err()
+	case <-time.After(10 * time.Second):
+		c.poolPending.Delete(id)
+		return nil, fmt.Errorf("timeout waiting for pool info")
 	}
 }
 

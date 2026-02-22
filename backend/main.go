@@ -16,6 +16,7 @@ import (
 	"github.com/whisper-darkly/sticky-dvr/backend/overseer"
 	"github.com/whisper-darkly/sticky-dvr/backend/router"
 	"github.com/whisper-darkly/sticky-dvr/backend/store/postgres"
+	"github.com/whisper-darkly/sticky-dvr/backend/thumbnailer"
 )
 
 var version = "dev"
@@ -72,6 +73,7 @@ func main() {
 		OnExited:     mgr.OnExited,
 		OnRestarting: mgr.OnRestarting,
 		OnErrored:    mgr.OnErrored,
+		OnConnected:  mgr.OnConnected,
 	})
 	mgr.SetOverseerClient(oc)
 
@@ -90,6 +92,15 @@ func main() {
 		log.Println("CONVERTER_URL not set; /files endpoint will return empty list")
 	}
 
+	// Thumbnailer client (optional — graceful degradation if THUMBNAILER_URL not set).
+	var thumbClient *thumbnailer.Client
+	if thumbnailerURL := os.Getenv("THUMBNAILER_URL"); thumbnailerURL != "" {
+		thumbClient = thumbnailer.NewClient(thumbnailerURL)
+		log.Printf("thumbnailer client: %s", thumbnailerURL)
+	} else {
+		log.Println("THUMBNAILER_URL not set; thumbnailer diagnostics unavailable")
+	}
+
 	// Periodically delete expired sessions (every hour).
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
@@ -104,11 +115,12 @@ func main() {
 	srv := &http.Server{
 		Addr: ":" + port,
 		Handler: router.New(router.Deps{
-			Store:           db,
-			Manager:         mgr,
-			Config:          cfg,
-			JWTSecret:       []byte(jwtSecret),
-			ConverterClient: convClient,
+			Store:             db,
+			Manager:           mgr,
+			Config:            cfg,
+			JWTSecret:         []byte(jwtSecret),
+			ConverterClient:   convClient,
+			ThumbnailerClient: thumbClient,
 		}),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,

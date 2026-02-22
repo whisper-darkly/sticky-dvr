@@ -16,6 +16,26 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// GlobalMetrics holds aggregate counters from the converter's in-memory state.
+type GlobalMetrics struct {
+	TasksStarted     int64 `json:"tasks_started"`
+	TasksCompleted   int64 `json:"tasks_completed"`
+	TasksErrored     int64 `json:"tasks_errored"`
+	TasksRestarted   int64 `json:"tasks_restarted"`
+	TotalOutputLines int64 `json:"total_output_lines"`
+	Enqueued         int64 `json:"enqueued"`
+	Dequeued         int64 `json:"dequeued"`
+	Displaced        int64 `json:"displaced"`
+	Expired          int64 `json:"expired"`
+}
+
+// PoolInfo holds a point-in-time snapshot of the converter pool state.
+type PoolInfo struct {
+	Limit      int `json:"limit"`
+	Running    int `json:"running"`
+	QueueDepth int `json:"queue_depth"`
+}
+
 // FileInfo describes a single conversion task returned to API consumers.
 type FileInfo struct {
 	Filename   string `json:"filename"`
@@ -109,6 +129,125 @@ func filterTasks(tasks []taskInfo, subpath string) []FileInfo {
 		files = []FileInfo{}
 	}
 	return files
+}
+
+// GetMetrics dials the converter and returns global aggregate counters.
+// Returns nil, nil if the converter is unreachable (graceful degradation).
+func (c *Client) GetMetrics(ctx context.Context) (*GlobalMetrics, error) {
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, c.wsURL, nil)
+	if err != nil {
+		return nil, nil
+	}
+	defer conn.Close()
+
+	reqID := c.nextID()
+	req, _ := json.Marshal(map[string]any{"type": "metrics", "id": reqID})
+	if err := conn.WriteMessage(websocket.TextMessage, req); err != nil {
+		return nil, nil
+	}
+
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			return nil, nil
+		}
+		var msg struct {
+			Type   string           `json:"type"`
+			ID     string           `json:"id"`
+			Global *json.RawMessage `json:"global,omitempty"`
+		}
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			continue
+		}
+		if msg.Type == "metrics" && msg.ID == reqID {
+			if msg.Global == nil {
+				return nil, nil
+			}
+			var gm GlobalMetrics
+			if err := json.Unmarshal(*msg.Global, &gm); err != nil {
+				return nil, nil
+			}
+			return &gm, nil
+		}
+	}
+}
+
+// GetPoolInfo dials the converter and returns a snapshot of global pool state.
+// Returns nil, nil if the converter is unreachable (graceful degradation).
+func (c *Client) GetPoolInfo(ctx context.Context) (*PoolInfo, error) {
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, c.wsURL, nil)
+	if err != nil {
+		return nil, nil
+	}
+	defer conn.Close()
+
+	reqID := c.nextID()
+	req, _ := json.Marshal(map[string]any{"type": "pool_info", "id": reqID})
+	if err := conn.WriteMessage(websocket.TextMessage, req); err != nil {
+		return nil, nil
+	}
+
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			return nil, nil
+		}
+		var msg struct {
+			Type string           `json:"type"`
+			ID   string           `json:"id"`
+			Pool *json.RawMessage `json:"pool,omitempty"`
+		}
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			continue
+		}
+		if msg.Type == "pool_info" && msg.ID == reqID {
+			if msg.Pool == nil {
+				return nil, nil
+			}
+			var pi PoolInfo
+			if err := json.Unmarshal(*msg.Pool, &pi); err != nil {
+				return nil, nil
+			}
+			return &pi, nil
+		}
+	}
+}
+
+// GetAllTasks dials the converter and returns all active/queued/errored tasks.
+// Returns an empty list if the converter is unreachable (graceful degradation).
+func (c *Client) GetAllTasks(ctx context.Context) ([]FileInfo, error) {
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, c.wsURL, nil)
+	if err != nil {
+		return []FileInfo{}, nil
+	}
+	defer conn.Close()
+
+	reqID := c.nextID()
+	req, _ := json.Marshal(map[string]any{"type": "list", "id": reqID})
+	if err := conn.WriteMessage(websocket.TextMessage, req); err != nil {
+		return []FileInfo{}, nil
+	}
+
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			return []FileInfo{}, nil
+		}
+		var msg struct {
+			Type  string     `json:"type"`
+			ID    string     `json:"id"`
+			Tasks []taskInfo `json:"tasks"`
+		}
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			continue
+		}
+		if msg.Type == "tasks" && msg.ID == reqID {
+			return filterTasks(msg.Tasks, ""), nil
+		}
+	}
 }
 
 // QueueFile sends a start request to the converter to queue the given file for conversion.
