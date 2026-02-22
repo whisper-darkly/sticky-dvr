@@ -6,9 +6,10 @@ dist/
 *.out
 coverage.html
 
-# Editor / IDE
+# Editor / IDE and tooling
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 
