@@ -143,6 +143,23 @@ export function deleteUser(id) { return request('DELETE', `/users/${id}`); }
 
 export function health() { return request('GET', '/health', undefined, false); }
 
+// healthCheck returns raw health data without throwing on 503 (overseer offline).
+// Returns: { ok: bool, status: int, overseer_connected: bool, status: string }
+export async function healthCheck() {
+  const token = getToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  try {
+    const res = await fetch(`${API_BASE}/health`, { method: 'GET', headers, credentials: 'include' });
+    const text = await res.text();
+    let json;
+    try { json = JSON.parse(text); } catch { json = {}; }
+    return { httpOk: res.ok, httpStatus: res.status, ...json };
+  } catch (err) {
+    return { httpOk: false, httpStatus: 0, status: 'unreachable', overseer_connected: false };
+  }
+}
+
 // ---- session helpers (exported for nav/guards) ----
 
 export { getUser as getSessionUser, getToken, clearSession };

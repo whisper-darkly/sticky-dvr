@@ -3,10 +3,16 @@
 import * as api from '../api.js';
 import { escape, postureBadge, stateBadge, fmtDate, showModal, navigate } from '../utils.js';
 
+function skeletonCards(count, cls) {
+  return Array(count).fill(`<div class="skeleton ${cls}"></div>`).join('');
+}
+
 let _pollTimer = null;
+let _healthTimer = null;
 
 export function cleanup() {
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  if (_healthTimer) { clearInterval(_healthTimer); _healthTimer = null; }
 }
 
 export async function render(container) {
@@ -17,13 +23,33 @@ export async function render(container) {
         <div class="page-title">Dashboard</div>
         <div class="page-subtitle">Active recording sources</div>
       </div>
-      <button class="btn btn-primary" id="dash-add">+ Add Subscription</button>
+      <div style="display:flex;align-items:center;gap:.75rem">
+        <span id="dash-health-badge" style="display:none"></span>
+        <button class="btn btn-primary" id="dash-add">+ Add Subscription</button>
+      </div>
     </div>
     <div class="stats-row" id="dash-stats"></div>
-    <div id="dash-content"><div class="loading-wrap"><span class="spinner"></span> Loading…</div></div>
+    <div id="dash-content">${skeletonCards(3, 'skeleton-card')}</div>
     <div class="last-updated" id="dash-updated"></div>`;
 
   container.querySelector('#dash-add').onclick = () => navigate('/subscriptions');
+
+  async function pollHealth() {
+    const badge = document.getElementById('dash-health-badge');
+    if (!badge) return;
+    const h = await api.healthCheck();
+    if (h.httpOk && h.overseer_connected) {
+      badge.style.display = 'none';
+    } else if (h.httpStatus === 503 && h.overseer_connected === false) {
+      badge.style.display = '';
+      badge.className = 'badge badge-warning';
+      badge.textContent = 'Overseer offline';
+    } else if (!h.httpOk) {
+      badge.style.display = '';
+      badge.className = 'badge badge-error';
+      badge.textContent = 'Backend unreachable';
+    }
+  }
 
   async function load() {
     try {
@@ -97,7 +123,9 @@ export async function render(container) {
   }
 
   await load();
+  await pollHealth();
   _pollTimer = setInterval(load, 5000);
+  _healthTimer = setInterval(pollHealth, 5000);
 }
 
 async function handleAction(sub, action, refresh) {

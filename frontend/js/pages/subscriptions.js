@@ -3,6 +3,10 @@
 import * as api from '../api.js';
 import { escape, postureBadge, stateBadge, fmtDate, showModal, navigate, DRIVERS } from '../utils.js';
 
+function skeletonRows(count) {
+  return Array(count).fill(`<div class="skeleton skeleton-row"></div>`).join('');
+}
+
 export function cleanup() {}
 
 export async function render(container) {
@@ -34,7 +38,7 @@ export async function render(container) {
       </form>
     </div>
 
-    <div id="subs-content"><div class="loading-wrap"><span class="spinner"></span> Loading…</div></div>`;
+    <div id="subs-content">${skeletonRows(4)}</div>`;
 
   const form = container.querySelector('#add-sub-form');
   form.addEventListener('submit', async (e) => {

@@ -194,6 +194,27 @@ tr:hover td { background: var(--surface2); }
 .badge-started    { background: #dcfce7; color: #15803d; }
 .badge-exited     { background: #fee2e2; color: #dc2626; }
 .badge-stopped    { background: #f3f4f6; color: #6b7280; }
+.badge-warning    { background: #fef3c7; color: #b45309; }
+
+/* ---- skeleton loading ---- */
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #e8eaed 25%, #f4f5f7 50%, #e8eaed 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s infinite;
+  border-radius: var(--radius);
+}
+.skeleton-card {
+  height: 120px;
+  margin-bottom: .75rem;
+}
+.skeleton-row {
+  height: 44px;
+  margin-bottom: .5rem;
+}
 
 /* ---- alerts ---- */
 .alert {

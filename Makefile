@@ -8,9 +8,11 @@ PROXY_IMAGE    := sticky-proxy
 DIST := dist
 
 .PHONY: all build-backend build-initdb build-all \
-        image-backend image-frontend image-proxy \
+        image-backend image-frontend image-proxy image-all \
         run-backend run-postgres run-all \
         export-backend export-frontend export-proxy \
+        bootstrap logs-all restart down \
+        dev dev-down \
         dev-certs clean
 
 # ---- build ----
@@ -60,6 +62,18 @@ image-proxy:
 
 image-all: image-backend image-frontend image-proxy
 
+# ---- bootstrap (zero-to-running) ----
+
+bootstrap: ## Generate certs (if needed), build all images, and start the stack
+	@if [ ! -f certs/tls.crt ]; then \
+		echo "Generating self-signed TLS certs…"; \
+		$(MAKE) dev-certs; \
+	else \
+		echo "TLS certs already present, skipping cert generation."; \
+	fi
+	$(MAKE) image-all
+	docker compose up -d
+
 # ---- run (docker compose) ----
 
 run-postgres:
@@ -71,8 +85,25 @@ run-all:
 stop:
 	docker compose down
 
-logs:
+down: ## Stop and remove all compose services
+	docker compose down
+
+restart: ## Restart all compose services without rebuilding
+	docker compose restart
+
+logs: ## Follow backend logs
 	docker compose logs -f backend
+
+logs-all: ## Follow logs from all compose services
+	docker compose logs -f
+
+# ---- dev (HTTP-only, no TLS, no JWT) ----
+
+dev: ## Start stack in HTTP-only dev mode (no TLS, no JWT, port 8080)
+	docker compose -f compose.yaml -f compose.override.http.yaml up -d
+
+dev-down: ## Stop HTTP-only dev stack
+	docker compose -f compose.yaml -f compose.override.http.yaml down
 
 # ---- export (save images to tar for airgapped deploy) ----
 
