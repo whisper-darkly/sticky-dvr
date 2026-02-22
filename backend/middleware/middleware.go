@@ -26,7 +26,12 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if raw == "" {
-				writeError(w, http.StatusUnauthorized, "missing authorization header")
+				if c, err := r.Cookie("access_token"); err == nil {
+					raw = c.Value
+				}
+			}
+			if raw == "" {
+				writeError(w, http.StatusUnauthorized, "missing token")
 				return
 			}
 			claims, err := auth.ParseAccessToken(secret, raw)

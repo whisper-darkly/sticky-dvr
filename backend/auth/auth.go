@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -13,7 +14,16 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const accessTokenTTL = 15 * time.Minute
+// accessTokenTTL is configurable via ACCESS_TOKEN_TTL env var (e.g. "1h", "30m").
+// Defaults to 1 hour.
+var accessTokenTTL = func() time.Duration {
+	if s := os.Getenv("ACCESS_TOKEN_TTL"); s != "" {
+		if d, err := time.ParseDuration(s); err == nil && d > 0 {
+			return d
+		}
+	}
+	return time.Hour
+}()
 
 // Claims is the JWT payload.
 type Claims struct {
