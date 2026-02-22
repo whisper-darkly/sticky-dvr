@@ -164,6 +164,7 @@ export function adminArchiveSubscription(subId) { return request('POST', `/admin
 export function adminDeleteSubscription(subId) { return request('DELETE', `/admin/subscriptions/${subId}`); }
 export function adminResetError(subId) { return request('POST', `/admin/subscriptions/${subId}/reset-error`); }
 export function adminGetSourceSubscribers(driver, username) { return request('GET', `/admin/sources/${driver}/${username}/subscribers`); }
+export function adminRestartSubscription(subId) { return request('POST', `/admin/subscriptions/${subId}/restart`); }
 export function adminRestartAllSources(includeErrored) { return request('POST', '/admin/sources/restart-all', { include_errored: !!includeErrored }); }
 export function adminGetUserSubscriptions(userId) { return request('GET', `/admin/users/${userId}/subscriptions`); }
 

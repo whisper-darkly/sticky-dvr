@@ -93,6 +93,8 @@ func New(d Deps) http.Handler {
 		requireAuth(requireAdmin(http.HandlerFunc(adminDeleteSubscription(d)))))
 	mux.Handle("POST /api/admin/subscriptions/{sub_id}/reset-error",
 		requireAuth(requireAdmin(http.HandlerFunc(adminResetError(d)))))
+	mux.Handle("POST /api/admin/subscriptions/{sub_id}/restart",
+		requireAuth(requireAdmin(http.HandlerFunc(adminRestartSubscription(d)))))
 
 	// ---- admin: bulk source operations ----
 	mux.Handle("POST /api/admin/sources/restart-all",
@@ -918,6 +920,22 @@ func adminResetError(d Deps) http.HandlerFunc {
 			return
 		}
 		status, err := d.Manager.AdminResetError(r.Context(), subID)
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, status)
+	}
+}
+
+func adminRestartSubscription(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		subID, err := parseSubID(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid sub_id")
+			return
+		}
+		status, err := d.Manager.AdminRestartSource(r.Context(), subID)
 		if err != nil {
 			writeError(w, http.StatusConflict, err.Error())
 			return

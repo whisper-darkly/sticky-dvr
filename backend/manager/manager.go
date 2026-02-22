@@ -691,7 +691,7 @@ func (m *Manager) ResetError(ctx context.Context, userID int64, driver, username
 	}
 
 	state.mu.Lock()
-	state.workerState = "starting"
+	state.workerState = "idle"
 	state.errorMessage = ""
 	state.mu.Unlock()
 	state.addLog("[system] reset — restarting worker with current configuration")
@@ -934,10 +934,65 @@ func (m *Manager) AdminResetError(ctx context.Context, subID int64) (*Subscripti
 		state.mu.Unlock()
 	}
 	state.mu.Lock()
-	state.workerState = "starting"
+	state.workerState = "idle"
 	state.errorMessage = ""
 	state.mu.Unlock()
 	state.addLog("[system] reset — restarting worker with current configuration")
+	go m.startWorker(src.ID)
+	return m.statusFor(src, sub), nil
+}
+
+// AdminRestartSource stops and restarts a single subscription's worker by sub_id (admin only).
+// Applies the same stop+clear+startWorker pattern as RestartAll so the latest configuration
+// (cookies, user_agent, etc.) is always picked up. Works on any worker state including errored.
+func (m *Manager) AdminRestartSource(ctx context.Context, subID int64) (*SubscriptionStatus, error) {
+	src, sub, err := m.lookupSubByID(ctx, subID)
+	if err != nil {
+		return nil, err
+	}
+
+	count, err := m.st.GetSourceActiveSubscriberCount(ctx, src.ID)
+	if err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return nil, fmt.Errorf("source %s/%s has no active subscribers", src.Driver, src.Username)
+	}
+
+	// Ensure in-memory state exists (may not be tracked if subscription was just resumed).
+	m.mu.Lock()
+	if _, exists := m.states[src.ID]; !exists {
+		m.states[src.ID] = &sourceState{source: src, workerState: "idle"}
+	}
+	m.mu.Unlock()
+
+	state := m.stateByID(src.ID)
+
+	state.mu.Lock()
+	taskID := state.source.OverseerTaskID
+	state.mu.Unlock()
+
+	if taskID != "" {
+		_ = m.oc.Stop(taskID)
+		if dbErr := m.st.SetSourceTaskID(ctx, src.ID, ""); dbErr != nil {
+			log.Printf("manager: restart: clear task_id source=%d: %v", src.ID, dbErr)
+		}
+		m.mu.Lock()
+		delete(m.taskIdx, taskID)
+		m.mu.Unlock()
+		state.mu.Lock()
+		state.source.OverseerTaskID = ""
+		state.mu.Unlock()
+	}
+
+	state.mu.Lock()
+	state.workerState = "idle"
+	state.errorMessage = ""
+	state.sessionActive = false
+	state.recordingState = ""
+	state.mu.Unlock()
+	state.addLog("[system] restarting (manual restart — applying current configuration)")
+
 	go m.startWorker(src.ID)
 	return m.statusFor(src, sub), nil
 }
@@ -1002,7 +1057,7 @@ func (m *Manager) RestartAll(ctx context.Context, includeErrored bool) (restarte
 		}
 
 		state.mu.Lock()
-		state.workerState = "starting"
+		state.workerState = "idle"
 		state.errorMessage = ""
 		state.sessionActive = false
 		state.recordingState = ""
