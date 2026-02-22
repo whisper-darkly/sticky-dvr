@@ -27,7 +27,9 @@ export async function render(container) {
 
   function renderForm(cfg) {
     const el = document.getElementById('config-content');
-    const fields = Object.entries(cfg);
+    // Exclude driver_urls from the simple field list (handled separately).
+    const fields = Object.entries(cfg).filter(([k]) => k !== 'driver_urls');
+    const driverUrls = cfg.driver_urls || {};
 
     el.innerHTML = `
       <div class="card">
@@ -37,7 +39,17 @@ export async function render(container) {
           ${fields.length ? fields.map(([k, v]) => renderField(k, v)).join('') : `
             <p style="color:var(--text-muted);font-size:.9rem">No configuration keys set. Use the JSON editor below to add values.</p>
           `}
-          <div class="form-group">
+
+          <div class="form-group" style="margin-top:1.5rem;border-top:1px solid var(--border);padding-top:1rem">
+            <div class="form-label" style="font-weight:600;margin-bottom:.5rem">Driver URL Templates</div>
+            <div class="form-hint" style="margin-bottom:.75rem">Use <code>{{.Username}}</code> as the performer name placeholder.</div>
+            <div id="driver-url-rows">
+              ${Object.entries(driverUrls).map(([driver, url]) => renderDriverUrlRow(driver, url)).join('')}
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm" id="add-driver-url" style="margin-top:.4rem">+ Add Driver URL</button>
+          </div>
+
+          <div class="form-group" style="margin-top:1rem">
             <label class="form-label">Raw JSON</label>
             <textarea class="form-control" id="cfg-json" rows="8" style="font-family:monospace;font-size:12px">${escape(JSON.stringify(cfg, null, 2))}</textarea>
             <div class="form-hint">Edit raw JSON — this is the authoritative value that will be saved.</div>
@@ -57,6 +69,20 @@ export async function render(container) {
     form.querySelectorAll('.cfg-field').forEach(input => {
       input.addEventListener('input', () => syncToJson(form, jsonEl));
     });
+
+    // Driver URL rows: sync to JSON on any input change.
+    el.querySelector('#driver-url-rows').addEventListener('input', () => syncToJson(form, jsonEl));
+    el.querySelector('#driver-url-rows').addEventListener('click', e => {
+      if (e.target.dataset.action === 'remove-driver-url') {
+        e.target.closest('.driver-url-row').remove();
+        syncToJson(form, jsonEl);
+      }
+    });
+    el.querySelector('#add-driver-url').onclick = () => {
+      const rows = el.querySelector('#driver-url-rows');
+      rows.insertAdjacentHTML('beforeend', renderDriverUrlRow('', ''));
+      syncToJson(form, jsonEl);
+    };
 
     el.querySelector('#cfg-reload').onclick = load;
 
@@ -119,8 +145,29 @@ export async function render(container) {
         else if (input.tagName === 'SELECT') obj[key] = input.value === 'true';
         else obj[key] = input.value;
       });
+      // Sync driver_urls from the dynamic rows.
+      const driverUrls = {};
+      form.querySelectorAll('.driver-url-row').forEach(row => {
+        const driverInput = row.querySelector('.driver-url-driver');
+        const urlInput    = row.querySelector('.driver-url-value');
+        if (driverInput && urlInput && driverInput.value.trim()) {
+          driverUrls[driverInput.value.trim()] = urlInput.value.trim();
+        }
+      });
+      obj.driver_urls = driverUrls;
       jsonEl.value = JSON.stringify(obj, null, 2);
     } catch {}
+  }
+
+  function renderDriverUrlRow(driver, url) {
+    return `
+      <div class="driver-url-row" style="display:flex;gap:.5rem;align-items:center;margin-bottom:.4rem">
+        <input type="text" class="form-control driver-url-driver" placeholder="driver (e.g. chaturbate)"
+          value="${escape(driver)}" style="flex:0 0 160px" />
+        <input type="text" class="form-control driver-url-value" placeholder="URL template with {{.Username}}"
+          value="${escape(url)}" style="flex:1" />
+        <button type="button" class="btn btn-ghost btn-sm" data-action="remove-driver-url">✕</button>
+      </div>`;
   }
 
   await load();

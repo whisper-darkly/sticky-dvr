@@ -122,6 +122,7 @@ export async function render(container) {
         <td>${fmtDateShort(u.created_at)}</td>
         <td>
           <div style="display:flex;gap:.35rem">
+            <a href="#/admin/users/${escape(String(u.id))}/subscriptions" class="btn btn-ghost btn-sm">Subs</a>
             <button class="btn btn-ghost btn-sm" data-action="edit">Edit</button>
             <button class="btn btn-danger btn-sm" data-action="delete">Delete</button>
           </div>

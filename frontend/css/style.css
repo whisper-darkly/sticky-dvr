@@ -183,9 +183,13 @@ tr:hover td { background: var(--surface2); }
   letter-spacing: .4px;
   white-space: nowrap;
 }
-.badge-recording { background: #dcfce7; color: #15803d; }
+.badge-recording  { background: #dcfce7; color: #15803d; }
+.badge-running    { background: #dcfce7; color: #15803d; }
 .badge-idle       { background: #f3f4f6; color: #6b7280; }
+.badge-sleeping   { background: #fef3c7; color: #b45309; }
+.badge-starting   { background: #fef3c7; color: #b45309; }
 .badge-error      { background: #fee2e2; color: #dc2626; }
+.badge-errored    { background: #fee2e2; color: #dc2626; }
 .badge-active     { background: #dbeafe; color: #1d4ed8; }
 .badge-paused     { background: #fef9c3; color: #a16207; }
 .badge-archived   { background: #f3f4f6; color: #9ca3af; }
@@ -285,12 +289,17 @@ tr:hover td { background: var(--surface2); }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 1.1rem;
+  padding: 0;
   box-shadow: var(--shadow);
   transition: box-shadow .15s;
+  overflow: hidden;
 }
 .sub-card:hover { box-shadow: var(--shadow-lg); }
+.sub-card > div:last-child { padding: 1.1rem; }
 .sub-card-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: .6rem; }
+
+.sub-thumb { width: 100%; aspect-ratio: 16/9; overflow: hidden; border-radius: var(--radius) var(--radius) 0 0; background: var(--surface2); }
+.sub-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .sub-source { font-weight: 600; font-size: .95rem; word-break: break-word; }
 .sub-driver { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-top: .1rem; }
 .sub-badges { display: flex; gap: .35rem; flex-wrap: wrap; margin-bottom: .8rem; }
@@ -396,6 +405,133 @@ tr:hover td { background: var(--surface2); }
   align-items: flex-end;
 }
 .add-sub-form .form-group { margin-bottom: 0; flex: 1; min-width: 120px; }
+
+/* ---- file browser ---- */
+.file-breadcrumb {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: .75rem;
+  word-break: break-all;
+}
+.file-breadcrumb a { color: var(--primary); }
+.file-thumb-preview {
+  width: 48px;
+  height: 27px;
+  object-fit: cover;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-right: .5rem;
+  background: var(--surface2);
+}
+
+/* ---- diagnostics ---- */
+.diag-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 1.25rem;
+}
+.diag-card {
+  border-top: 3px solid var(--border);
+}
+.diag-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .5rem;
+}
+.diag-section {
+  margin-top: .9rem;
+  padding-top: .75rem;
+  border-top: 1px solid var(--border);
+}
+.diag-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-muted);
+  margin-bottom: .5rem;
+}
+.diag-pool-row {
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+}
+.diag-pool-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: .5rem;
+}
+.diag-pool-stat {
+  background: var(--surface2);
+  border-radius: var(--radius);
+  padding: .5rem .4rem;
+  text-align: center;
+}
+.diag-pool-stat .stat-num   { font-size: 1.25rem; }
+.diag-pool-stat .stat-label { font-size: 11px; }
+.diag-pool-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+.diag-pool-bar {
+  height: 8px;
+  background: var(--surface2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.diag-pool-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width .4s ease, background .4s ease;
+}
+.diag-pool-bar-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+.diag-metrics {
+  grid-template-columns: repeat(4, 1fr);
+}
+.diag-error {
+  font-size: 13px;
+  color: var(--danger);
+  margin: .35rem 0 .5rem;
+}
+.badge-success { background: #dcfce7; color: #15803d; }
+.badge-error   { background: #fee2e2; color: #b91c1c; }
+
+/* ---- recording pulse badge ---- */
+.badge-recording {
+  background: #fef2f2;
+  color: #b91c1c;
+  animation: pulse-rec 1.2s ease-in-out infinite;
+}
+@keyframes pulse-rec {
+  0%, 100% { opacity: 0.75; }
+  50%       { opacity: 1.0; }
+}
+
+/* ---- scrollable event list ---- */
+.event-list-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* ---- file stat hint in file browser ---- */
+.file-stat-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: .5rem;
+}
+
+/* ---- detail-meta: small muted paragraph in status card ---- */
+.detail-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: .4rem;
+}
 
 /* ---- responsive ---- */
 @media (max-width: 600px) {

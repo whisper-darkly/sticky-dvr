@@ -1,7 +1,7 @@
 // admin-sources.js — All sources across all users (admin only)
 
 import * as api from '../api.js';
-import { escape, postureBadge, stateBadge, fmtDate, navigate } from '../utils.js';
+import { escape, postureBadge, stateBadge, fmtDate, showModal } from '../utils.js';
 
 export function cleanup() {}
 
@@ -21,11 +21,13 @@ export async function render(container) {
 
   container.querySelector('#src-refresh').onclick = load;
 
+  let _allSubs = [];
+
   async function load() {
     const el = document.getElementById('sources-content');
     try {
-      const subs = await api.listSubscriptions(); // admin sees all
-      renderTable(subs);
+      _allSubs = await api.listSubscriptions(); // admin sees all
+      renderTable(_allSubs);
     } catch (err) {
       el.innerHTML = `<div class="alert alert-error">Failed to load: ${escape(err.message)}</div>`;
     }
@@ -53,8 +55,9 @@ export async function render(container) {
                 ${col('driver', 'Driver')}
                 ${col('username', 'Username')}
                 ${col('posture', 'Posture')}
-                ${col('state', 'State')}
+                ${col('worker_state', 'State')}
                 ${col('created_at', 'Subscribed')}
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody id="src-tbody"></tbody>
@@ -75,13 +78,25 @@ export async function render(container) {
     const tbody = document.getElementById('src-tbody');
     sorted.forEach(sub => {
       const tr = document.createElement('tr');
-      tr.style.cursor = 'pointer';
       tr.innerHTML = `
         <td>${escape(sub.driver)}</td>
         <td><a href="#/source/${escape(sub.driver)}/${escape(sub.username)}">${escape(sub.username)}</a></td>
         <td>${postureBadge(sub.posture)}</td>
-        <td>${sub.state ? stateBadge(sub.state) : '<span style="color:var(--text-muted)">—</span>'}</td>
-        <td>${fmtDate(sub.created_at)}</td>`;
+        <td>${sub.worker_state ? stateBadge(sub.worker_state) : '<span style="color:var(--text-muted)">—</span>'}</td>
+        <td>${fmtDate(sub.created_at)}</td>
+        <td>
+          <div style="display:flex;gap:.35rem;flex-wrap:wrap">
+            ${sub.posture === 'active'       ? `<button class="btn btn-ghost btn-sm" data-action="pause">Pause</button>` : ''}
+            ${sub.posture === 'paused'       ? `<button class="btn btn-ghost btn-sm" data-action="resume">Resume</button>` : ''}
+            ${sub.posture !== 'archived'     ? `<button class="btn btn-ghost btn-sm" data-action="archive">Archive</button>` : ''}
+            ${sub.worker_state === 'errored' ? `<button class="btn btn-ghost btn-sm" data-action="reset-error">Reset</button>` : ''}
+            <button class="btn btn-danger btn-sm" data-action="delete">Delete</button>
+          </div>
+        </td>`;
+
+      tr.querySelectorAll('[data-action]').forEach(btn => {
+        btn.addEventListener('click', () => handleAction(sub, btn.dataset.action, load));
+      });
       tbody.appendChild(tr);
     });
   }
@@ -93,4 +108,33 @@ export async function render(container) {
   }
 
   await load();
+}
+
+async function handleAction(sub, action, refresh) {
+  if (action === 'delete') {
+    showModal({
+      title: 'Delete subscription?',
+      body: `Remove ${sub.driver}/${sub.username}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      confirmClass: 'btn-danger',
+      onConfirm: async () => {
+        try {
+          await api.adminDeleteSubscription(sub.sub_id);
+          refresh();
+        } catch (err) {
+          alert(`Delete failed: ${err.message}`);
+        }
+      },
+    });
+    return;
+  }
+  try {
+    if (action === 'pause')       await api.adminPauseSubscription(sub.sub_id);
+    if (action === 'resume')      await api.adminResumeSubscription(sub.sub_id);
+    if (action === 'archive')     await api.adminArchiveSubscription(sub.sub_id);
+    if (action === 'reset-error') await api.adminResetError(sub.sub_id);
+    refresh();
+  } catch (err) {
+    alert(`Action failed: ${err.message}`);
+  }
 }

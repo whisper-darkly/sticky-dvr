@@ -80,3 +80,30 @@ export function currentHash() {
 }
 
 export const DRIVERS = ['chaturbate', 'stripchat', 'bongacams', 'cam4', 'camsoda'];
+
+// How often thumbnails are refreshed for actively recording sources (ms).
+// Used as a URL bucket (?t=N) so the browser re-fetches only when the bucket changes.
+export const THUMB_REFRESH_MS = 30_000;
+
+// Parse a Go duration string like "1h23m45s" or "5m30.5s" into fractional seconds.
+export function parseDurationToSecs(s) {
+  if (!s) return 0;
+  let total = 0;
+  const m = s.match(/(?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?/);
+  if (!m) return 0;
+  if (m[1]) total += parseInt(m[1], 10) * 3600;
+  if (m[2]) total += parseInt(m[2], 10) * 60;
+  if (m[3]) total += parseFloat(m[3]);
+  return total;
+}
+
+// Format integer seconds as a compact duration string (e.g. "5m30s", "1h02m05s").
+export function fmtDuration(secs) {
+  secs = Math.max(0, Math.floor(secs));
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return `${h}h${String(m).padStart(2, '0')}m${String(s).padStart(2, '0')}s`;
+  if (m > 0) return `${m}m${String(s).padStart(2, '0')}s`;
+  return `${s}s`;
+}

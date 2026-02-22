@@ -1,16 +1,16 @@
-// api.js — Fetch wrapper with auth, refresh, and error handling
+// api.js — Fetch wrapper with cookie-based auth, refresh, and error handling
+// JWT access token is stored as an HttpOnly cookie by the server.
+// All requests use credentials: 'include' so the browser sends it automatically.
 
 const API_BASE = '/api';
 
+// getToken returns truthy when the user is known to be logged in (session in sessionStorage).
+// This is NOT the actual JWT value — that lives in an HttpOnly cookie.
 function getToken() {
-  return sessionStorage.getItem('access_token');
+  return sessionStorage.getItem('user') ? '1' : null;
 }
 
-function setToken(token) {
-  sessionStorage.setItem('access_token', token);
-}
-
-function getUser() {
+function _getSessionUser() {
   try {
     return JSON.parse(sessionStorage.getItem('user') || 'null');
   } catch {
@@ -19,7 +19,6 @@ function getUser() {
 }
 
 function clearSession() {
-  sessionStorage.removeItem('access_token');
   sessionStorage.removeItem('user');
 }
 
@@ -34,9 +33,7 @@ async function refreshToken() {
       window.location.hash = '/login';
       throw new Error('Session expired');
     }
-    const data = await res.json();
-    setToken(data.access_token);
-    return data.access_token;
+    // Server sets new access_token cookie via Set-Cookie; no token to store client-side.
   })();
   try {
     return await _refreshing;
@@ -46,10 +43,7 @@ async function refreshToken() {
 }
 
 async function request(method, path, body, retry = true) {
-  const token = getToken();
   const headers = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
   const opts = { method, headers, credentials: 'include' };
   if (body !== undefined) opts.body = JSON.stringify(body);
 
@@ -57,9 +51,9 @@ async function request(method, path, body, retry = true) {
 
   if (res.status === 401 && retry) {
     try {
-      const newToken = await refreshToken();
-      headers['Authorization'] = `Bearer ${newToken}`;
-      res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
+      await refreshToken();
+      // Retry with the same opts — new cookie is set automatically by Set-Cookie.
+      res = await fetch(`${API_BASE}${path}`, opts);
     } catch {
       throw new Error('Unauthorized');
     }
@@ -95,7 +89,7 @@ export async function login(username, password) {
   });
   const data = await res.json();
   if (!res.ok) throw new ApiError(res.status, data.error || 'Login failed');
-  setToken(data.access_token);
+  // access_token cookie is set by the server (HttpOnly); store only the user profile.
   sessionStorage.setItem('user', JSON.stringify(data.user));
   return data;
 }
@@ -126,6 +120,52 @@ export function getSourceEvents(driver, username) { return request('GET', `/sour
 export function getSourceLogs(driver, username) { return request('GET', `/sources/${driver}/${username}/logs`); }
 export function getSourceFiles(driver, username) { return request('GET', `/sources/${driver}/${username}/files`); }
 
+export function getSourceFileStats(driver, username, path) {
+  return request('GET', `/sources/${driver}/${username}/filestat?path=${encodeURIComponent(path || '')}`);
+}
+
+// ---- media files (nginx autoindex, JWT-cookie-protected) ----
+
+export async function listMediaFiles(driver, username, subpath = '', retry = true) {
+  // Always include trailing slash to avoid nginx redirect (which breaks CORS).
+  const pathSuffix = subpath ? `${subpath}/` : '';
+  const path = `/media/subscriptions/${driver}/${username}/${pathSuffix}`;
+  let res = await fetch(path, {
+    headers: { Accept: 'application/json' },
+    credentials: 'include',
+  });
+
+  // Handle token expiry the same way as request() does.
+  if (res.status === 401 && retry) {
+    try {
+      await refreshToken();
+      res = await fetch(path, { headers: { Accept: 'application/json' }, credentials: 'include' });
+    } catch {
+      throw new ApiError(401, 'Unauthorized');
+    }
+  }
+
+  if (res.status === 404) return [];
+  if (!res.ok) throw new ApiError(res.status, `media: ${res.status}`);
+  return res.json();
+}
+
+// ---- me: change password ----
+
+export function changePassword(currentPw, newPw) {
+  return request('POST', '/me/change-password', { current_password: currentPw, new_password: newPw });
+}
+
+// ---- admin: subscription management (by sub_id) ----
+
+export function adminPauseSubscription(subId) { return request('POST', `/admin/subscriptions/${subId}/pause`); }
+export function adminResumeSubscription(subId) { return request('POST', `/admin/subscriptions/${subId}/resume`); }
+export function adminArchiveSubscription(subId) { return request('POST', `/admin/subscriptions/${subId}/archive`); }
+export function adminDeleteSubscription(subId) { return request('DELETE', `/admin/subscriptions/${subId}`); }
+export function adminResetError(subId) { return request('POST', `/admin/subscriptions/${subId}/reset-error`); }
+export function adminGetSourceSubscribers(driver, username) { return request('GET', `/admin/sources/${driver}/${username}/subscribers`); }
+export function adminGetUserSubscriptions(userId) { return request('GET', `/admin/users/${userId}/subscriptions`); }
+
 // ---- config ----
 
 export function getConfig() { return request('GET', '/config'); }
@@ -139,18 +179,17 @@ export function getUser(id) { return request('GET', `/users/${id}`); }
 export function updateUser(id, fields) { return request('PUT', `/users/${id}`, fields); }
 export function deleteUser(id) { return request('DELETE', `/users/${id}`); }
 
+// ---- admin: diagnostics ----
+
+export function getDiagnostics() { return request('GET', '/admin/diagnostics'); }
+
 // ---- health ----
 
 export function health() { return request('GET', '/health', undefined, false); }
 
-// healthCheck returns raw health data without throwing on 503 (overseer offline).
-// Returns: { ok: bool, status: int, overseer_connected: bool, status: string }
 export async function healthCheck() {
-  const token = getToken();
-  const headers = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
   try {
-    const res = await fetch(`${API_BASE}/health`, { method: 'GET', headers, credentials: 'include' });
+    const res = await fetch(`${API_BASE}/health`, { method: 'GET', credentials: 'include' });
     const text = await res.text();
     let json;
     try { json = JSON.parse(text); } catch { json = {}; }
@@ -162,4 +201,4 @@ export async function healthCheck() {
 
 // ---- session helpers (exported for nav/guards) ----
 
-export { getUser as getSessionUser, getToken, clearSession };
+export { _getSessionUser as getSessionUser, getToken, clearSession };
