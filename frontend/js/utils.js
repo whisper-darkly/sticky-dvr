@@ -97,13 +97,15 @@ export function parseDurationToSecs(s) {
   return total;
 }
 
-// Format integer seconds as a compact duration string (e.g. "5m30s", "1h02m05s").
+// Format integer seconds as HH:MM:SS, optionally prefixed with "DD days".
+// Examples: "00:04:32", "1 day 01:23:45", "3 days 00:01:00"
 export function fmtDuration(secs) {
   secs = Math.max(0, Math.floor(secs));
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  if (h > 0) return `${h}h${String(m).padStart(2, '0')}m${String(s).padStart(2, '0')}s`;
-  if (m > 0) return `${m}m${String(s).padStart(2, '0')}s`;
-  return `${s}s`;
+  const days = Math.floor(secs / 86400);
+  const h    = Math.floor((secs % 86400) / 3600);
+  const m    = Math.floor((secs % 3600) / 60);
+  const s    = secs % 60;
+  const hms  = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  if (days === 0) return hms;
+  return `${days} ${days === 1 ? 'day' : 'days'} ${hms}`;
 }
