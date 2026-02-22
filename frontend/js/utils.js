@@ -54,13 +54,18 @@ export function eventBadge(eventType) {
   return `<span class="badge badge-${e}">${escape(eventType)}</span>`;
 }
 
-export function showModal({ title, body, confirmLabel = 'Confirm', confirmClass = 'btn-danger', onConfirm }) {
+// showModal displays a confirmation dialog.
+// Pass `body` for plain-text content (auto-escaped) or `bodyHtml` for raw HTML content.
+// `onConfirm` receives the overlay element as its first argument, allowing callers to
+// read form values from the modal before it is removed from the DOM.
+export function showModal({ title, body, bodyHtml, confirmLabel = 'Confirm', confirmClass = 'btn-danger', onConfirm }) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
+  const bodyContent = bodyHtml !== undefined ? bodyHtml : escape(body);
   overlay.innerHTML = `
     <div class="modal">
       <div class="modal-title">${escape(title)}</div>
-      <div class="modal-body">${escape(body)}</div>
+      <div class="modal-body">${bodyContent}</div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="modal-cancel">Cancel</button>
         <button class="btn ${confirmClass}" id="modal-confirm">${escape(confirmLabel)}</button>
@@ -68,7 +73,7 @@ export function showModal({ title, body, confirmLabel = 'Confirm', confirmClass 
     </div>`;
   document.body.appendChild(overlay);
   overlay.querySelector('#modal-cancel').onclick = () => overlay.remove();
-  overlay.querySelector('#modal-confirm').onclick = () => { overlay.remove(); onConfirm(); };
+  overlay.querySelector('#modal-confirm').onclick = () => { onConfirm(overlay); overlay.remove(); };
 }
 
 export function navigate(hash) {
