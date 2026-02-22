@@ -150,6 +150,7 @@ dev-certs:
 image-poc-recorder: ## Build sticky-recorder:poc image (recorder + ffmpeg)
 	docker build \
 		-f poc/Dockerfile.recorder \
+		-t $(RECORDER_IMAGE):$(VERSION) \
 		-t $(RECORDER_IMAGE):poc \
 		-t $(RECORDER_IMAGE):latest \
 		..
@@ -157,6 +158,7 @@ image-poc-recorder: ## Build sticky-recorder:poc image (recorder + ffmpeg)
 image-poc-thumbnailer: ## Build sticky-thumbnailer:poc image
 	docker build \
 		-f poc/Dockerfile.thumbnailer \
+		-t $(THUMBNAILER_IMAGE):$(VERSION) \
 		-t $(THUMBNAILER_IMAGE):poc \
 		-t $(THUMBNAILER_IMAGE):latest \
 		..
@@ -164,6 +166,7 @@ image-poc-thumbnailer: ## Build sticky-thumbnailer:poc image
 image-poc-converter: ## Build sticky-converter:poc image (linuxserver/ffmpeg + NVENC)
 	docker build \
 		-f poc/Dockerfile.converter \
+		-t $(CONVERTER_IMAGE):$(VERSION) \
 		-t $(CONVERTER_IMAGE):poc \
 		-t $(CONVERTER_IMAGE):latest \
 		..
@@ -174,18 +177,18 @@ image-poc-all: image-poc-recorder image-poc-thumbnailer image-poc-converter ## B
 
 export-poc-recorder:
 	mkdir -p $(DEPLOY_DIST)
-	docker save $(RECORDER_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(RECORDER_IMAGE)-latest.tar.gz
-	@echo "Saved $(DEPLOY_DIST)/$(RECORDER_IMAGE)-latest.tar.gz"
+	docker save $(RECORDER_IMAGE):$(VERSION) $(RECORDER_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(RECORDER_IMAGE)-$(VERSION).tar.gz
+	@echo "Saved $(DEPLOY_DIST)/$(RECORDER_IMAGE)-$(VERSION).tar.gz (tags: $(VERSION), latest)"
 
 export-poc-thumbnailer:
 	mkdir -p $(DEPLOY_DIST)
-	docker save $(THUMBNAILER_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(THUMBNAILER_IMAGE)-latest.tar.gz
-	@echo "Saved $(DEPLOY_DIST)/$(THUMBNAILER_IMAGE)-latest.tar.gz"
+	docker save $(THUMBNAILER_IMAGE):$(VERSION) $(THUMBNAILER_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(THUMBNAILER_IMAGE)-$(VERSION).tar.gz
+	@echo "Saved $(DEPLOY_DIST)/$(THUMBNAILER_IMAGE)-$(VERSION).tar.gz (tags: $(VERSION), latest)"
 
 export-poc-converter:
 	mkdir -p $(DEPLOY_DIST)
-	docker save $(CONVERTER_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(CONVERTER_IMAGE)-latest.tar.gz
-	@echo "Saved $(DEPLOY_DIST)/$(CONVERTER_IMAGE)-latest.tar.gz"
+	docker save $(CONVERTER_IMAGE):$(VERSION) $(CONVERTER_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(CONVERTER_IMAGE)-$(VERSION).tar.gz
+	@echo "Saved $(DEPLOY_DIST)/$(CONVERTER_IMAGE)-$(VERSION).tar.gz (tags: $(VERSION), latest)"
 
 export-poc-all: export-poc-recorder export-poc-thumbnailer export-poc-converter ## Export all PoC images to dist/deploy/
 
@@ -193,14 +196,14 @@ export-poc-all: export-poc-recorder export-poc-thumbnailer export-poc-converter 
 
 dist-deploy: image-all image-poc-all ## Build all images, export to dist/deploy/, copy deploy configs
 	mkdir -p $(DEPLOY_DIST)/config $(DEPLOY_DIST)/compose
-	# Export core images
-	docker save $(BACKEND_IMAGE):latest  | gzip > $(DEPLOY_DIST)/$(BACKEND_IMAGE)-latest.tar.gz
-	docker save $(FRONTEND_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(FRONTEND_IMAGE)-latest.tar.gz
-	docker save $(PROXY_IMAGE):latest    | gzip > $(DEPLOY_DIST)/$(PROXY_IMAGE)-latest.tar.gz
-	# Export PoC images
-	docker save $(RECORDER_IMAGE):latest   | gzip > $(DEPLOY_DIST)/$(RECORDER_IMAGE)-latest.tar.gz
-	docker save $(THUMBNAILER_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(THUMBNAILER_IMAGE)-latest.tar.gz
-	docker save $(CONVERTER_IMAGE):latest  | gzip > $(DEPLOY_DIST)/$(CONVERTER_IMAGE)-latest.tar.gz
+	# Export core images (version + latest tags in each tar)
+	docker save $(BACKEND_IMAGE):$(VERSION)  $(BACKEND_IMAGE):latest  | gzip > $(DEPLOY_DIST)/$(BACKEND_IMAGE)-$(VERSION).tar.gz
+	docker save $(FRONTEND_IMAGE):$(VERSION) $(FRONTEND_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(FRONTEND_IMAGE)-$(VERSION).tar.gz
+	docker save $(PROXY_IMAGE):$(VERSION)    $(PROXY_IMAGE):latest    | gzip > $(DEPLOY_DIST)/$(PROXY_IMAGE)-$(VERSION).tar.gz
+	# Export PoC images (version + latest tags in each tar)
+	docker save $(RECORDER_IMAGE):$(VERSION)   $(RECORDER_IMAGE):latest   | gzip > $(DEPLOY_DIST)/$(RECORDER_IMAGE)-$(VERSION).tar.gz
+	docker save $(THUMBNAILER_IMAGE):$(VERSION) $(THUMBNAILER_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(THUMBNAILER_IMAGE)-$(VERSION).tar.gz
+	docker save $(CONVERTER_IMAGE):$(VERSION)  $(CONVERTER_IMAGE):latest  | gzip > $(DEPLOY_DIST)/$(CONVERTER_IMAGE)-$(VERSION).tar.gz
 	# Copy deploy configs
 	cp deploy/config/* $(DEPLOY_DIST)/config/
 	cp deploy/compose/* $(DEPLOY_DIST)/compose/
