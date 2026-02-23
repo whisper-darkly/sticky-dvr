@@ -43,7 +43,8 @@ type sourceState struct {
 	// sessionActive is true from the first RECORDING START until SESSION END or process exit.
 	// Unlike recordingState, it stays true through segment boundaries (RECORDING END → RECORDING START)
 	// and SLEEP events, so the UI can show the source as "in session" without debounce logic.
-	sessionActive bool
+	sessionActive    bool
+	sessionStartedAt time.Time // wall-clock time of the first RECORDING START in this session
 }
 
 func (s *sourceState) addLog(line string) {
@@ -91,7 +92,8 @@ type SubscriptionStatus struct {
 	LastRecordingAt *time.Time `json:"last_recording_at,omitempty"`
 	// SessionActive is true from RECORDING START until SESSION END or process exit.
 	// Stays true through segment boundaries and SLEEP — use this for "in session" UI logic.
-	SessionActive bool `json:"session_active"`
+	SessionActive    bool       `json:"session_active"`
+	SessionStartedAt *time.Time `json:"session_started_at,omitempty"`
 
 	// Derived fields
 	CanonicalURL string `json:"canonical_url,omitempty"`
@@ -294,6 +296,10 @@ func (m *Manager) OnOutput(taskID string, pid int, stream, data string, ts time.
 	case "RECORDING START":
 		stateObj.recordingState = "recording"
 		stateObj.lastRecordingAt = ts
+		if !stateObj.sessionActive {
+			// First segment of a new session — anchor the session clock.
+			stateObj.sessionStartedAt = ts
+		}
 		stateObj.sessionActive = true
 	case "RECORDING END":
 		stateObj.recordingState = "idle"
@@ -304,6 +310,7 @@ func (m *Manager) OnOutput(taskID string, pid int, stream, data string, ts time.
 	case "SESSION END":
 		stateObj.recordingState = "idle"
 		stateObj.sessionActive = false
+		stateObj.sessionStartedAt = time.Time{}
 	case "HEARTBEAT":
 		stateObj.recordingState = "recording"
 		stateObj.lastHeartbeat = ts
@@ -335,6 +342,7 @@ func (m *Manager) OnExited(taskID string, pid int, exitCode int, intentional boo
 	}
 	state.recordingState = ""
 	state.sessionActive = false
+	state.sessionStartedAt = time.Time{}
 	driver := state.source.Driver
 	username := state.source.Username
 	state.mu.Unlock()
@@ -989,6 +997,7 @@ func (m *Manager) AdminRestartSource(ctx context.Context, subID int64) (*Subscri
 	state.workerState = "idle"
 	state.errorMessage = ""
 	state.sessionActive = false
+	state.sessionStartedAt = time.Time{}
 	state.recordingState = ""
 	state.mu.Unlock()
 	state.addLog("[system] restarting (manual restart — applying current configuration)")
@@ -1060,6 +1069,7 @@ func (m *Manager) RestartAll(ctx context.Context, includeErrored bool) (restarte
 		state.workerState = "idle"
 		state.errorMessage = ""
 		state.sessionActive = false
+		state.sessionStartedAt = time.Time{}
 		state.recordingState = ""
 		state.mu.Unlock()
 		state.addLog("[system] restarting (restart-all — applying current configuration)")
@@ -1232,6 +1242,10 @@ func (m *Manager) statusFor(src *store.Source, sub *store.Subscription) *Subscri
 	if !state.lastRecordingAt.IsZero() {
 		t := state.lastRecordingAt
 		s.LastRecordingAt = &t
+	}
+	if !state.sessionStartedAt.IsZero() {
+		t := state.sessionStartedAt
+		s.SessionStartedAt = &t
 	}
 	state.mu.Unlock()
 

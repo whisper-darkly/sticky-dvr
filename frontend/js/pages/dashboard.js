@@ -2,7 +2,7 @@
 
 import * as api from '../api.js';
 import { escape, stateBadge, fmtDate, navigate,
-         THUMB_REFRESH_MS, parseDurationToSecs, fmtDuration } from '../utils.js';
+         THUMB_REFRESH_MS, fmtDuration } from '../utils.js';
 
 let _pollTimer  = null;
 let _healthTimer = null;
@@ -89,16 +89,14 @@ export async function render(container) {
       card.className = 'sub-card';
       const thumbSrc = `/thumbnails/${escape(sub.driver)}/${escape(sub.username)}.jpg?t=${thumbBucket}`;
 
-      // Compute the ticker reference: prefer last_heartbeat + session_duration as the
-      // most accurate anchor; fall back to last_recording_at as the segment start.
-      const baseSecs = parseDurationToSecs(sub.session_duration);
-      const refMs = sub.last_heartbeat
-        ? new Date(sub.last_heartbeat).getTime()
-        : (sub.last_recording_at ? new Date(sub.last_recording_at).getTime() : 0);
-
-      // Initial displayed duration (will be ticked up every second by _tickTimer).
-      const initSecs = refMs ? baseSecs + Math.max(0, Math.floor((Date.now() - refMs) / 1000)) : baseSecs;
-      const durText = (baseSecs > 0 || refMs) ? ` ${fmtDuration(initSecs)}` : '';
+      // Root the timer at session_started_at (the first RECORDING START of this session).
+      // If the field is absent (older backend, mid-session restart), fall back to now so
+      // the counter starts from 0:00 and counts up rather than showing stale data.
+      const sessionStartMs = sub.session_started_at
+        ? new Date(sub.session_started_at).getTime()
+        : Date.now();
+      const initSecs = Math.max(0, Math.floor((Date.now() - sessionStartMs) / 1000));
+      const durText = ` ${fmtDuration(initSecs)}`;
 
       card.innerHTML = `
         <div class="sub-thumb">
@@ -116,8 +114,7 @@ export async function render(container) {
           </div>
           <div class="sub-badges" style="margin:.4rem 0">
             <span class="badge badge-recording"
-                  data-rec-base="${baseSecs}"
-                  data-rec-ref="${refMs}">● REC${escape(durText)}</span>
+                  data-session-start="${sessionStartMs}">● REC${escape(durText)}</span>
           </div>
           <div class="sub-actions">
             <button class="btn btn-ghost btn-sm" data-action="pause">Pause</button>
@@ -134,12 +131,10 @@ export async function render(container) {
   // Tick the REC duration badges every second without re-fetching data.
   function tickDurations() {
     const now = Date.now();
-    document.querySelectorAll('.badge-recording[data-rec-base]').forEach(el => {
-      const base = parseInt(el.dataset.recBase || '0', 10);
-      const ref  = parseInt(el.dataset.recRef  || '0', 10);
-      if (!ref && !base) return;
-      const elapsed = ref ? Math.max(0, Math.floor((now - ref) / 1000)) : 0;
-      el.textContent = `● REC ${fmtDuration(base + elapsed)}`;
+    document.querySelectorAll('.badge-recording[data-session-start]').forEach(el => {
+      const start = parseInt(el.dataset.sessionStart || '0', 10);
+      if (!start) return;
+      el.textContent = `● REC ${fmtDuration(Math.max(0, Math.floor((now - start) / 1000)))}`;
     });
   }
 
