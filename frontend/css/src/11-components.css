@@ -1,0 +1,48 @@
+/* ---- modal ---- */
+
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200;
+  padding: 1rem;
+}
+.modal {
+  background: var(--surface);
+  border-radius: calc(var(--radius) * 1.5);
+  box-shadow: var(--shadow-lg);
+  padding: 1.75rem;
+  width: 100%;
+  max-width: 420px;
+}
+.modal-title   { font-size: 1.1rem; font-weight: 700; margin-bottom: .6rem; }
+.modal-body    { color: var(--text-muted); font-size: .9rem; margin-bottom: 1.25rem; }
+.modal-actions { display: flex; gap: .6rem; justify-content: flex-end; }
+
+/* ---- empty state ---- */
+
+.empty-state { text-align: center; padding: 3rem 1rem; color: var(--text-muted); }
+.empty-state-icon  { font-size: 2.5rem; margin-bottom: .75rem; }
+.empty-state-title { font-size: 1rem; font-weight: 600; color: var(--text); margin-bottom: .35rem; }
+.empty-state-text  { font-size: .875rem; }
+
+/* ---- spinner ---- */
+
+.spinner {
+  display: inline-block;
+  width: 16px; height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  gap: .75rem;
+  color: var(--text-muted);
+}

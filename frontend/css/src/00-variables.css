@@ -1,0 +1,59 @@
+/* ============================================================
+   Default theme — light mode
+   No classes needed on <html>; all other themes/modes layer on
+   top of these values via higher-specificity selectors.
+   ============================================================ */
+
+:root {
+  /* ---- backgrounds ---- */
+  --bg:       #f5f6fa;
+  --surface:  #ffffff;
+  --surface2: #f0f1f5;
+
+  /* ---- borders & shadows ---- */
+  --border:    #dde1ea;
+  --shadow:    0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,.12);
+
+  /* ---- typography ---- */
+  --text:       #1a1d2e;
+  --text-muted: #6b7280;
+
+  /* ---- accent ---- */
+  --primary:      #4f6ef7;
+  --primary-dark: #3b57e0;   /* hover/active state */
+
+  /* ---- status ---- */
+  --danger:      #ef4444;
+  --danger-dark: #dc2626;
+  --success:     #22c55e;
+  --warning:     #f59e0b;
+
+  /* ---- misc ---- */
+  --radius: 8px;
+
+  /* ---- log box ---- */
+  --log-bg: #111827;
+  --log-fg: #d1fae5;
+
+  /* ---- skeleton ---- */
+  --skeleton-base:  #e8eaed;
+  --skeleton-shine: #f4f5f7;
+
+  /* ---- badge token colors ---- */
+  --badge-success-bg:  #dcfce7; --badge-success-fg:  #15803d;
+  --badge-error-bg:    #fee2e2; --badge-error-fg:    #dc2626;
+  --badge-idle-bg:     #f3f4f6; --badge-idle-fg:     #6b7280;
+  --badge-sleep-bg:    #fef3c7; --badge-sleep-fg:    #b45309;
+  --badge-active-bg:   #dbeafe; --badge-active-fg:   #1d4ed8;
+  --badge-paused-bg:   #fef9c3; --badge-paused-fg:   #a16207;
+  --badge-archived-bg: #f3f4f6; --badge-archived-fg: #9ca3af;
+  --badge-admin-bg:    #ede9fe; --badge-admin-fg:    #7c3aed;
+  --badge-user-bg:     #f0fdf4; --badge-user-fg:     #166534;
+
+  /* ---- alert token colors ---- */
+  --alert-error-bg:      #fee2e2; --alert-error-border:   #fca5a5; --alert-error-fg:   #991b1b;
+  --alert-success-bg:    #dcfce7; --alert-success-border: #86efac; --alert-success-fg: #166634;
+  --alert-info-bg:       #dbeafe; --alert-info-border:    #93c5fd; --alert-info-fg:    #1e40af;
+  --alert-warning-bg:    #fef9c3; --alert-warning-border: #fde047; --alert-warning-fg: #a16207;
+}

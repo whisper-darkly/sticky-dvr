@@ -1,0 +1,61 @@
+/* ============================================================
+   Dark mode — html.dark
+   Applied when user selects "Dark" or "Auto" with OS dark pref.
+   ============================================================ */
+
+html.dark {
+  /* backgrounds */
+  --bg:       #0f1117;
+  --surface:  #1c1f2e;
+  --surface2: #252836;
+
+  /* borders & shadows */
+  --border:    #2e3244;
+  --shadow:    0 1px 3px rgba(0,0,0,.4),  0 1px 2px rgba(0,0,0,.3);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,.55);
+
+  /* typography */
+  --text:       #e8eaf2;
+  --text-muted: #8b93a8;
+
+  /* accent */
+  --primary:      #6b8cff;
+  --primary-dark: #8aa3ff;
+
+  /* status */
+  --danger:      #f87171;
+  --danger-dark: #fca5a5;
+  --success:     #4ade80;
+  --warning:     #fbbf24;
+
+  /* log box */
+  --log-bg: #080c14;
+  --log-fg: #a7f3d0;
+
+  /* skeleton */
+  --skeleton-base:  #252836;
+  --skeleton-shine: #2e3348;
+
+  /* badge tokens — semi-transparent tints over dark surfaces */
+  --badge-success-bg:  rgba(74, 222, 128, .12); --badge-success-fg:  #86efac;
+  --badge-error-bg:    rgba(248, 113, 113, .12); --badge-error-fg:    #fca5a5;
+  --badge-idle-bg:     rgba(255, 255, 255, .06); --badge-idle-fg:     #9ca3af;
+  --badge-sleep-bg:    rgba(251, 191,  36, .12); --badge-sleep-fg:    #fde68a;
+  --badge-active-bg:   rgba(107, 140, 255, .12); --badge-active-fg:   #a5b4fc;
+  --badge-paused-bg:   rgba(234, 179,   8, .12); --badge-paused-fg:   #fde047;
+  --badge-archived-bg: rgba(255, 255, 255, .06); --badge-archived-fg: #6b7280;
+  --badge-admin-bg:    rgba(167, 139, 250, .12); --badge-admin-fg:    #c4b5fd;
+  --badge-user-bg:     rgba(74,  222, 128, .10); --badge-user-fg:     #6ee7b7;
+
+  /* alert tokens — semi-transparent tints */
+  --alert-error-bg:      rgba(248,113,113,.10); --alert-error-border:   rgba(248,113,113,.30); --alert-error-fg:   #fca5a5;
+  --alert-success-bg:    rgba(74,222,128,.10);  --alert-success-border: rgba(74,222,128,.30);  --alert-success-fg: #86efac;
+  --alert-info-bg:       rgba(107,140,255,.10); --alert-info-border:    rgba(107,140,255,.30); --alert-info-fg:    #a5b4fc;
+  --alert-warning-bg:    rgba(251,191, 36,.10); --alert-warning-border: rgba(251,191, 36,.30); --alert-warning-fg: #fde68a;
+}
+
+/* recording badge pulse uses a dark-friendly tint */
+html.dark .badge-recording {
+  background: rgba(248, 113, 113, .15);
+  color: #fca5a5;
+}

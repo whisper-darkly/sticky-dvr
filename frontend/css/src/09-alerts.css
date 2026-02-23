@@ -1,0 +1,13 @@
+/* ---- alerts ---- */
+
+.alert {
+  padding: .75rem 1rem;
+  border-radius: var(--radius);
+  font-size: 13px;
+  margin-bottom: 1rem;
+  border: 1px solid transparent;
+}
+.alert-error   { background: var(--alert-error-bg);   border-color: var(--alert-error-border);   color: var(--alert-error-fg); }
+.alert-success { background: var(--alert-success-bg); border-color: var(--alert-success-border); color: var(--alert-success-fg); }
+.alert-info    { background: var(--alert-info-bg);    border-color: var(--alert-info-border);    color: var(--alert-info-fg); }
+.alert-warning { background: var(--alert-warning-bg); border-color: var(--alert-warning-border); color: var(--alert-warning-fg); }

@@ -1,0 +1,101 @@
+/* ============================================================
+   Erotic theme — html.theme-erotic
+   Sensual, bold, intimate. Deep crimson primaries, warm blush
+   backgrounds, rose-gold accents, velvet darks.
+   ============================================================ */
+
+html.theme-erotic {
+  --bg:       #fff8f8;
+  --surface:  #ffffff;
+  --surface2: #fdeef0;
+
+  --border:    #f0c4cc;
+  --shadow:    0 1px 3px rgba(150,20,50,.08), 0 1px 2px rgba(150,20,50,.06);
+  --shadow-lg: 0 4px 16px rgba(150,20,50,.16);
+
+  --text:       #1f0a0e;
+  --text-muted: #8c4458;
+
+  --primary:      #be123c;
+  --primary-dark: #9f1239;
+
+  --danger:      #dc2626;
+  --danger-dark: #b91c1c;
+  --success:     #059669;
+  --warning:     #b45309;
+
+  --log-bg: #150508;
+  --log-fg: #fda4af;
+
+  --skeleton-base:  #f5d6db;
+  --skeleton-shine: #fce8eb;
+
+  /* badge tokens — rose-warm palette */
+  --badge-success-bg:  #d1fae5; --badge-success-fg:  #065f46;
+  --badge-error-bg:    #fce7f3; --badge-error-fg:    #9d174d;
+  --badge-idle-bg:     #fdf2f8; --badge-idle-fg:     #831843;
+  --badge-sleep-bg:    #fce7f3; --badge-sleep-fg:    #831843;
+  --badge-active-bg:   #fce7f3; --badge-active-fg:   #9d174d;
+  --badge-paused-bg:   #fff1f2; --badge-paused-fg:   #9f1239;
+  --badge-archived-bg: #fdf2f8; --badge-archived-fg: #78716c;
+  --badge-admin-bg:    #fce7f3; --badge-admin-fg:    #831843;
+  --badge-user-bg:     #fff1f2; --badge-user-fg:     #9f1239;
+
+  --alert-error-bg:      #fce7f3; --alert-error-border:   #f9a8d4; --alert-error-fg:   #831843;
+  --alert-success-bg:    #d1fae5; --alert-success-border: #6ee7b7; --alert-success-fg: #064e3b;
+  --alert-info-bg:       #fff1f2; --alert-info-border:    #fda4af; --alert-info-fg:    #9f1239;
+  --alert-warning-bg:    #fff7ed; --alert-warning-border: #fdba74; --alert-warning-fg: #7c2d12;
+}
+
+html.theme-erotic .badge-recording {
+  background: #fff1f2;
+  color: #9f1239;
+}
+
+/* ---- Erotic dark — deep velvet night ---- */
+html.theme-erotic.dark {
+  --bg:       #0c0306;
+  --surface:  #1a0810;
+  --surface2: #26101a;
+
+  --border:    #4a1526;
+  --shadow:    0 1px 3px rgba(0,0,0,.55), 0 1px 2px rgba(0,0,0,.45);
+  --shadow-lg: 0 4px 20px rgba(0,0,0,.72);
+
+  --text:       #fde8ee;
+  --text-muted: #c47090;
+
+  --primary:      #fb7185;
+  --primary-dark: #fda4af;
+
+  --danger:      #f87171;
+  --danger-dark: #fca5a5;
+  --success:     #34d399;
+  --warning:     #fbbf24;
+
+  --log-bg: #070204;
+  --log-fg: #fda4af;
+
+  --skeleton-base:  #26101a;
+  --skeleton-shine: #331624;
+
+  --badge-success-bg:  rgba(52, 211, 153, .12); --badge-success-fg:  #6ee7b7;
+  --badge-error-bg:    rgba(251, 113, 133,.12);  --badge-error-fg:    #fda4af;
+  --badge-idle-bg:     rgba(255,255,255, .06);   --badge-idle-fg:     #9ca3af;
+  --badge-sleep-bg:    rgba(253,164, 175,.10);   --badge-sleep-fg:    #fda4af;
+  --badge-active-bg:   rgba(251, 113, 133,.12);  --badge-active-fg:   #fda4af;
+  --badge-paused-bg:   rgba(253,164, 175,.08);   --badge-paused-fg:   #fbcfe8;
+  --badge-archived-bg: rgba(255,255,255, .05);   --badge-archived-fg: #6b7280;
+  --badge-admin-bg:    rgba(251, 113, 133,.14);  --badge-admin-fg:    #fecdd3;
+  --badge-user-bg:     rgba(253,164, 175,.10);   --badge-user-fg:     #fbcfe8;
+
+  --alert-error-bg:      rgba(251,113,133,.10); --alert-error-border:   rgba(251,113,133,.30); --alert-error-fg:   #fda4af;
+  --alert-success-bg:    rgba(52,211,153,.10);  --alert-success-border: rgba(52,211,153,.30);  --alert-success-fg: #6ee7b7;
+  --alert-info-bg:       rgba(253,164,175,.10); --alert-info-border:    rgba(253,164,175,.30); --alert-info-fg:    #fda4af;
+  --alert-warning-bg:    rgba(251,191, 36,.10); --alert-warning-border: rgba(251,191, 36,.30); --alert-warning-fg: #fde68a;
+}
+
+html.theme-erotic.dark .badge-recording {
+  background: rgba(251, 113, 133, .18);
+  color: #fda4af;
+}

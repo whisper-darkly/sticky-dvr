@@ -1,0 +1,134 @@
+/* ---- theme picker widget ---- */
+
+.theme-picker {
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* toggle button */
+.tp-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+  padding: 0;
+}
+.tp-btn:hover, .tp-btn.open {
+  background: var(--surface2);
+  color: var(--text);
+  border-color: var(--primary);
+}
+
+/* dropdown panel */
+.tp-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 220px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.5);
+  box-shadow: var(--shadow-lg);
+  padding: .75rem;
+  z-index: 500;
+  display: none;
+}
+.tp-panel.open { display: block; }
+
+/* section within panel */
+.tp-section { margin-bottom: .75rem; }
+.tp-section:last-child { margin-bottom: 0; }
+
+.tp-sct-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+  margin-bottom: .5rem;
+}
+
+/* theme swatches */
+.tp-swatches {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+.tp-swatch {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  width: 100%;
+  padding: .35rem .5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+  text-align: left;
+}
+.tp-swatch:hover { background: var(--surface2); }
+.tp-swatch.active {
+  background: var(--surface2);
+  border-color: var(--primary);
+}
+
+/* swatch color dot */
+.tp-dot {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2px solid rgba(0,0,0,.1);
+}
+
+/* dot colors match each theme's primary */
+.tp-dot          { background: #4f6ef7; }  /* default */
+.tp-dot-fiesta   { background: #e84532; }
+.tp-dot-twilight { background: #7c3aed; }
+.tp-dot-erotic   { background: #be123c; }
+
+/* divider between sections */
+.tp-divider {
+  height: 1px;
+  background: var(--border);
+  margin: .75rem -.75rem;
+}
+
+/* mode toggle group */
+.tp-mode-group {
+  display: flex;
+  gap: .25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2px;
+  background: var(--surface2);
+}
+.tp-mode {
+  flex: 1;
+  padding: .3rem .25rem;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+  white-space: nowrap;
+}
+.tp-mode:hover  { color: var(--text); }
+.tp-mode.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0,0,0,.1);
+}

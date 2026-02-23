@@ -11,7 +11,10 @@ CONVERTER_IMAGE  := sticky-converter
 DIST := dist
 DEPLOY_DIST := dist/deploy
 
-.PHONY: all build-backend build-initdb build-all \
+CSS_SRC := frontend/css/src
+CSS_OUT := frontend/css/style.css
+
+.PHONY: all build-backend build-initdb build-all build-css \
         image-backend image-frontend image-proxy image-all \
         image-poc-recorder image-poc-thumbnailer image-poc-converter image-poc-all \
         run-backend run-postgres run-all \
@@ -25,6 +28,29 @@ DEPLOY_DIST := dist/deploy
 # ---- build ----
 
 all: build-all
+
+build-css: ## Concatenate CSS source files into frontend/css/style.css
+	cat \
+	  $(CSS_SRC)/00-variables.css \
+	  $(CSS_SRC)/01-reset.css \
+	  $(CSS_SRC)/02-layout.css \
+	  $(CSS_SRC)/03-cards.css \
+	  $(CSS_SRC)/04-buttons.css \
+	  $(CSS_SRC)/05-forms.css \
+	  $(CSS_SRC)/06-tables.css \
+	  $(CSS_SRC)/07-badges.css \
+	  $(CSS_SRC)/08-skeleton.css \
+	  $(CSS_SRC)/09-alerts.css \
+	  $(CSS_SRC)/10-pages.css \
+	  $(CSS_SRC)/11-components.css \
+	  $(CSS_SRC)/12-theme-picker.css \
+	  $(CSS_SRC)/13-responsive.css \
+	  $(CSS_SRC)/themes/dark.css \
+	  $(CSS_SRC)/themes/fiesta.css \
+	  $(CSS_SRC)/themes/twilight.css \
+	  $(CSS_SRC)/themes/erotic.css \
+	  > $(CSS_OUT)
+	@echo "Built $(CSS_OUT)"
 
 build-backend:
 	mkdir -p $(DIST)
@@ -53,7 +79,7 @@ image-backend:
 		-t $(BACKEND_IMAGE):latest \
 		.
 
-image-frontend:
+image-frontend: build-css
 	docker build \
 		-f Dockerfile.frontend \
 		-t $(FRONTEND_IMAGE):$(VERSION) \

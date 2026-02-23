@@ -6,6 +6,15 @@
   <title>sticky DVR</title>
   <link rel="stylesheet" href="/css/style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14'>📺</text></svg>" />
+  <!-- Anti-FOUC: apply theme/mode classes before first paint -->
+  <script>
+  (function(){
+    function gc(n){var m=document.cookie.match(new RegExp('(?:^|; )'+n+'=([^;]*)'));return m?decodeURIComponent(m[1]):'';}
+    var theme=gc('sdvr_theme'),mode=gc('sdvr_mode')||'system',r=document.documentElement;
+    if(theme)r.classList.add('theme-'+theme);
+    if(mode==='dark'||mode==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches)r.classList.add('dark');
+  })();
+  </script>
 </head>
 <body>
   <div id="app">

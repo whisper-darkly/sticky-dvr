@@ -1,0 +1,102 @@
+/* ============================================================
+   Fiesta theme — html.theme-fiesta
+   Vibrant, festive Latin carnival energy. Warm coral, golden
+   yellow, tropical greens, hot pink accents.
+   ============================================================ */
+
+html.theme-fiesta {
+  --bg:       #fffbf0;
+  --surface:  #ffffff;
+  --surface2: #fff5dc;
+
+  --border:    #f0d090;
+  --shadow:    0 1px 3px rgba(180,80,0,.10), 0 1px 2px rgba(180,80,0,.08);
+  --shadow-lg: 0 4px 16px rgba(180,80,0,.18);
+
+  --text:       #2c1406;
+  --text-muted: #8b5e2a;
+
+  --primary:      #e84532;
+  --primary-dark: #c73320;
+
+  --danger:      #dc2626;
+  --danger-dark: #b91c1c;
+  --success:     #16a34a;
+  --warning:     #d97706;
+
+  --log-bg: #1c0a04;
+  --log-fg: #ffd6a5;
+
+  --skeleton-base:  #f5dfa8;
+  --skeleton-shine: #fcefc5;
+
+  /* badge tokens — warmer tones */
+  --badge-success-bg:  #d1fae5; --badge-success-fg:  #065f46;
+  --badge-error-bg:    #fee2e2; --badge-error-fg:    #9b1c1c;
+  --badge-idle-bg:     #fef3c7; --badge-idle-fg:     #92400e;
+  --badge-sleep-bg:    #fde68a; --badge-sleep-fg:    #78350f;
+  --badge-active-bg:   #ffdab9; --badge-active-fg:   #7c2d12;
+  --badge-paused-bg:   #fef9c3; --badge-paused-fg:   #713f12;
+  --badge-archived-bg: #f5f0e8; --badge-archived-fg: #78716c;
+  --badge-admin-bg:    #fce7f3; --badge-admin-fg:    #9d174d;
+  --badge-user-bg:     #dcfce7; --badge-user-fg:     #14532d;
+
+  --alert-error-bg:      #fee2e2; --alert-error-border:   #fca5a5; --alert-error-fg:   #7f1d1d;
+  --alert-success-bg:    #d1fae5; --alert-success-border: #6ee7b7; --alert-success-fg: #064e3b;
+  --alert-info-bg:       #fde68a; --alert-info-border:    #fbbf24; --alert-info-fg:    #78350f;
+  --alert-warning-bg:    #fff3cd; --alert-warning-border: #ffc107; --alert-warning-fg: #664d03;
+}
+
+/* recording badge — fiesta red pulse */
+html.theme-fiesta .badge-recording {
+  background: #ffe4e1;
+  color: #c0392b;
+}
+
+/* ---- Fiesta dark ---- */
+html.theme-fiesta.dark {
+  --bg:       #1a0804;
+  --surface:  #2d1008;
+  --surface2: #3d1a0e;
+
+  --border:    #5c2a16;
+  --shadow:    0 1px 3px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4);
+  --shadow-lg: 0 4px 20px rgba(0,0,0,.65);
+
+  --text:       #ffd4b0;
+  --text-muted: #c97a52;
+
+  --primary:      #ff6b4a;
+  --primary-dark: #ff8c72;
+
+  --danger:      #ff6b6b;
+  --danger-dark: #ff9090;
+  --success:     #4ade80;
+  --warning:     #fbbf24;
+
+  --log-bg: #0d0402;
+  --log-fg: #ffd6a5;
+
+  --skeleton-base:  #3d1a0e;
+  --skeleton-shine: #4f2515;
+
+  --badge-success-bg:  rgba(74, 222, 128, .12); --badge-success-fg:  #86efac;
+  --badge-error-bg:    rgba(255,107, 74, .15);  --badge-error-fg:    #ffb09a;
+  --badge-idle-bg:     rgba(255,255,255, .06);  --badge-idle-fg:     #9ca3af;
+  --badge-sleep-bg:    rgba(251,191,  36,.12);  --badge-sleep-fg:    #fde68a;
+  --badge-active-bg:   rgba(255,107, 74, .12);  --badge-active-fg:   #ffaa8a;
+  --badge-paused-bg:   rgba(251,191,  36,.10);  --badge-paused-fg:   #fde047;
+  --badge-archived-bg: rgba(255,255,255, .05);  --badge-archived-fg: #6b7280;
+  --badge-admin-bg:    rgba(253,164,175, .12);  --badge-admin-fg:    #fda4af;
+  --badge-user-bg:     rgba(74, 222,128, .10);  --badge-user-fg:     #6ee7b7;
+
+  --alert-error-bg:      rgba(255,107,74,.12);  --alert-error-border:   rgba(255,107,74,.30);  --alert-error-fg:   #ffb09a;
+  --alert-success-bg:    rgba(74,222,128,.10);  --alert-success-border: rgba(74,222,128,.30);  --alert-success-fg: #86efac;
+  --alert-info-bg:       rgba(255,180,74,.10);  --alert-info-border:    rgba(255,180,74,.30);  --alert-info-fg:    #fcd34d;
+  --alert-warning-bg:    rgba(251,191,36,.10);  --alert-warning-border: rgba(251,191,36,.30);  --alert-warning-fg: #fde68a;
+}
+
+html.theme-fiesta.dark .badge-recording {
+  background: rgba(255, 107, 74, .18);
+  color: #ffb09a;
+}

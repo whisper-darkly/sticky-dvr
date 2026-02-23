@@ -1,0 +1,101 @@
+/* ============================================================
+   Twilight theme — html.theme-twilight
+   Cool, mysterious, dusk-hour sophistication. Deep indigo
+   primaries, cool lavender backgrounds, star-speckled darks.
+   ============================================================ */
+
+html.theme-twilight {
+  --bg:       #f0eff8;
+  --surface:  #fafaff;
+  --surface2: #e8e6f4;
+
+  --border:    #cec9e8;
+  --shadow:    0 1px 3px rgba(60,30,120,.08), 0 1px 2px rgba(60,30,120,.06);
+  --shadow-lg: 0 4px 16px rgba(60,30,120,.16);
+
+  --text:       #1a1635;
+  --text-muted: #6d6090;
+
+  --primary:      #7c3aed;
+  --primary-dark: #6521d4;
+
+  --danger:      #e11d48;
+  --danger-dark: #be123c;
+  --success:     #059669;
+  --warning:     #b45309;
+
+  --log-bg: #0d0b1e;
+  --log-fg: #c4b5fd;
+
+  --skeleton-base:  #dddaf0;
+  --skeleton-shine: #edeaf7;
+
+  /* badge tokens — purple-cool tones */
+  --badge-success-bg:  #d1fae5; --badge-success-fg:  #065f46;
+  --badge-error-bg:    #fce7f3; --badge-error-fg:    #9d174d;
+  --badge-idle-bg:     #ede9fe; --badge-idle-fg:     #5b21b6;
+  --badge-sleep-bg:    #fef3c7; --badge-sleep-fg:    #78350f;
+  --badge-active-bg:   #ede9fe; --badge-active-fg:   #4c1d95;
+  --badge-paused-bg:   #f5f3ff; --badge-paused-fg:   #6d28d9;
+  --badge-archived-bg: #f1f0f8; --badge-archived-fg: #78716c;
+  --badge-admin-bg:    #ede9fe; --badge-admin-fg:    #6d28d9;
+  --badge-user-bg:     #ecfdf5; --badge-user-fg:     #065f46;
+
+  --alert-error-bg:      #fce7f3; --alert-error-border:   #f9a8d4; --alert-error-fg:   #831843;
+  --alert-success-bg:    #d1fae5; --alert-success-border: #6ee7b7; --alert-success-fg: #064e3b;
+  --alert-info-bg:       #ede9fe; --alert-info-border:    #c4b5fd; --alert-info-fg:    #4c1d95;
+  --alert-warning-bg:    #fef9c3; --alert-warning-border: #fde047; --alert-warning-fg: #713f12;
+}
+
+html.theme-twilight .badge-recording {
+  background: #fce7f3;
+  color: #9d174d;
+}
+
+/* ---- Twilight dark — deep midnight indigo ---- */
+html.theme-twilight.dark {
+  --bg:       #08061a;
+  --surface:  #120f2a;
+  --surface2: #1c1840;
+
+  --border:    #2d285a;
+  --shadow:    0 1px 3px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4);
+  --shadow-lg: 0 4px 20px rgba(0,0,0,.7);
+
+  --text:       #e8e2ff;
+  --text-muted: #9d91c8;
+
+  --primary:      #a78bfa;
+  --primary-dark: #c4b5fd;
+
+  --danger:      #fb7185;
+  --danger-dark: #fda4af;
+  --success:     #34d399;
+  --warning:     #fbbf24;
+
+  --log-bg: #040312;
+  --log-fg: #c4b5fd;
+
+  --skeleton-base:  #1c1840;
+  --skeleton-shine: #28224e;
+
+  --badge-success-bg:  rgba(52, 211, 153, .12); --badge-success-fg:  #6ee7b7;
+  --badge-error-bg:    rgba(251,113,133, .12);  --badge-error-fg:    #fda4af;
+  --badge-idle-bg:     rgba(255,255,255, .06);  --badge-idle-fg:     #9ca3af;
+  --badge-sleep-bg:    rgba(251,191,  36,.12);  --badge-sleep-fg:    #fde68a;
+  --badge-active-bg:   rgba(167,139, 250,.12);  --badge-active-fg:   #c4b5fd;
+  --badge-paused-bg:   rgba(196,181, 253,.10);  --badge-paused-fg:   #ddd6fe;
+  --badge-archived-bg: rgba(255,255,255, .05);  --badge-archived-fg: #6b7280;
+  --badge-admin-bg:    rgba(167,139, 250,.15);  --badge-admin-fg:    #ddd6fe;
+  --badge-user-bg:     rgba(52, 211,153, .10);  --badge-user-fg:     #6ee7b7;
+
+  --alert-error-bg:      rgba(251,113,133,.10); --alert-error-border:   rgba(251,113,133,.30); --alert-error-fg:   #fda4af;
+  --alert-success-bg:    rgba(52,211,153,.10);  --alert-success-border: rgba(52,211,153,.30);  --alert-success-fg: #6ee7b7;
+  --alert-info-bg:       rgba(167,139,250,.10); --alert-info-border:    rgba(167,139,250,.30); --alert-info-fg:    #c4b5fd;
+  --alert-warning-bg:    rgba(251,191,36,.10);  --alert-warning-border: rgba(251,191,36,.30);  --alert-warning-fg: #fde68a;
+}
+
+html.theme-twilight.dark .badge-recording {
+  background: rgba(251, 113, 133, .15);
+  color: #fda4af;
+}

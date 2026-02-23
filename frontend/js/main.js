@@ -2,7 +2,7 @@
 
 import * as api from './api.js';
 import { escape, navigate } from './utils.js';
-
+import { initTheme, initThemePicker, themPickerHTML } from './theme.js';
 import { render as renderLogin  }         from './pages/login.js';
 import { render as renderDashboard,  cleanup as cleanDash  }  from './pages/dashboard.js';
 import { render as renderSubscriptions, cleanup as cleanSubs } from './pages/subscriptions.js';
@@ -13,6 +13,10 @@ import { render as renderAdminSrc,   cleanup as cleanAdminSrc } from './pages/ad
 import { render as renderAdminUserSubs, cleanup as cleanAdminUserSubs } from './pages/admin-user-subs.js';
 import { render as renderAdminDiag, cleanup as cleanAdminDiag } from './pages/admin-diagnostics.js';
 import { render as renderProfile, cleanup as cleanProfile } from './pages/profile.js';
+
+// Apply theme on module load (covers the case where the inline script ran
+// before cookies were set, e.g. very first visit).
+initTheme();
 
 let _currentCleanup = null;
 
@@ -140,6 +144,7 @@ function renderNav(user) {
       ${isAdmin ? '<span class="badge badge-admin">admin</span>' : ''}
       <a href="#/profile" class="btn btn-ghost btn-sm">Profile</a>
       <button class="btn btn-ghost btn-sm" id="nav-logout">Sign out</button>
+      ${themPickerHTML()}
     </div>`;
 
   document.getElementById('nav-logout').onclick = async () => {
@@ -147,6 +152,8 @@ function renderNav(user) {
     await api.logout();
     navigate('/login');
   };
+
+  initThemePicker();
 }
 
 // Kick off

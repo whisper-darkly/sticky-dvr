@@ -1,0 +1,11 @@
+/* ---- responsive ---- */
+
+@media (max-width: 600px) {
+  .nav       { padding: 0 1rem; gap: 1rem; }
+  .main      { padding: 1rem; }
+  .page-header  { flex-direction: column; align-items: flex-start; }
+  .stats-row    { grid-template-columns: 1fr 1fr; }
+  .sub-grid     { grid-template-columns: 1fr; }
+  .nav-links a  { padding: .3rem .5rem; }
+  .nav-user > span { display: none; }  /* hide "Signed in as" on mobile */
+}

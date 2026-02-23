@@ -1,0 +1,31 @@
+/* ---- tables ---- */
+
+.table-wrap { overflow-x: auto; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+th {
+  text-align: left;
+  padding: .6rem .75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+td {
+  padding: .6rem .75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td      { background: var(--surface2); }
+
+.sortable       { cursor: pointer; user-select: none; }
+.sortable:hover { color: var(--text); }
+
+/* ---- selected row highlight ---- */
+tr.row-selected { background: color-mix(in srgb, var(--primary) 6%, transparent); }
+
+/* ---- checkbox column ---- */
+.col-check { width: 2rem; padding-right: .25rem !important; }
