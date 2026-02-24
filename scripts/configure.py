@@ -2,10 +2,9 @@
 """Render sticky-dvr config templates.
 
 Usage:
-    python3 scripts/configure.py --out dist/docker [--merge-local]
+    python3 scripts/configure.py --out dist/docker [--local config.local.yaml]
 
-Env vars:
-    MERGE_LOCAL=1   equivalent to --merge-local
+If --local is omitted, config.local.yaml is merged automatically if it exists.
 """
 
 import argparse
@@ -21,7 +20,7 @@ REPO_ROOT = SCRIPT_DIR.parent
 
 TEMPLATES_DIR = REPO_ROOT / "config-templates"
 BASE_CONFIG = REPO_ROOT / "config.yaml"
-LOCAL_CONFIG = REPO_ROOT / "config.local.yaml"
+DEFAULT_LOCAL = REPO_ROOT / "config.local.yaml"
 
 
 def deep_merge(base, override):
@@ -34,20 +33,22 @@ def deep_merge(base, override):
     return base
 
 
-def load_config(merge_local=False):
+def load_config(local_path=None):
     with open(BASE_CONFIG) as f:
         config = yaml.safe_load(f)
 
-    if merge_local:
-        if LOCAL_CONFIG.exists():
-            with open(LOCAL_CONFIG) as f:
-                local = yaml.safe_load(f) or {}
-            deep_merge(config, local)
-        else:
-            print(
-                f"warning: --merge-local set but {LOCAL_CONFIG} not found",
-                file=sys.stderr,
-            )
+    if local_path is not None:
+        # Explicit path — error if missing
+        p = Path(local_path)
+        if not p.exists():
+            print(f"error: local config not found: {p}", file=sys.stderr)
+            sys.exit(1)
+        with open(p) as f:
+            deep_merge(config, yaml.safe_load(f) or {})
+    elif DEFAULT_LOCAL.exists():
+        # Auto-detect
+        with open(DEFAULT_LOCAL) as f:
+            deep_merge(config, yaml.safe_load(f) or {})
 
     return config
 
@@ -74,14 +75,13 @@ def main():
     parser = argparse.ArgumentParser(description="Render sticky-dvr config templates")
     parser.add_argument("--out", default="dist/docker", help="Output directory")
     parser.add_argument(
-        "--merge-local",
-        action="store_true",
-        help="Merge config.local.yaml over config.yaml",
+        "--local",
+        metavar="FILE",
+        help="Local config to merge over config.yaml (default: config.local.yaml if present)",
     )
     args = parser.parse_args()
 
-    merge_local = args.merge_local or os.environ.get("MERGE_LOCAL") == "1"
-    config = load_config(merge_local=merge_local)
+    config = load_config(local_path=args.local)
 
     print(f"Rendering templates → {args.out}/")
     render_templates(config, args.out)

@@ -1,0 +1,22 @@
+dvr:
+  sites:
+    chaturbate: true
+    stripchat: true
+  recording:
+    resolution: "720"
+    framerate: "30"
+    segment_length: "0"
+    check_interval: "1m"
+    heartbeat_interval: "30s"
+  converter:
+    gpu: false
+  task_pool:
+    limit: 8
+    queue_size: 100
+proxy:
+  tls: true
+  http_port: 80
+  https_port: 443
+ports:
+  http: 80
+  https: 443

@@ -202,9 +202,9 @@ compose: ## Copy compose.yaml to dist/docker/
 	mkdir -p $(DIST)
 	cp compose.yaml $(DIST)/compose.yaml
 
-configure: ## Render config-templates into dist/docker/ (add MERGE_LOCAL=1 to include config.local.yaml)
+configure: ## Render config-templates into dist/docker/ (LOCAL_CONFIG=path to override local merge source)
 	mkdir -p $(DIST)/config
-	python3 scripts/configure.py --out $(DIST) $(if $(MERGE_LOCAL),--merge-local,)
+	python3 scripts/configure.py --out $(DIST) $(if $(LOCAL_CONFIG),--local $(LOCAL_CONFIG),)
 
 config: configure ## alias
 
