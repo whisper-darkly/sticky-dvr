@@ -1,4 +1,4 @@
-// Package converter provides a WebSocket client for the sticky-converter (sticky-refinery) service.
+// Package converter provides a WebSocket client for the sticky-converter service.
 // The converter uses sticky-overseer v2 protocol at /ws.
 // Note: the converter only exposes queued/active/errored tasks; successfully completed
 // conversions are tracked in the converter's internal DB and not exposed via this API.
