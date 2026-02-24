@@ -28,4 +28,4 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace github.com/whisper-darkly/sticky-overseer/v2 => ../../sticky-overseer
+replace github.com/whisper-darkly/sticky-overseer/v2 => ../sticky-overseer

@@ -22,7 +22,4 @@ services:
 
   backend:
     environment:
-      COOKIE_SECURE: "false"   # allow HttpOnly cookies over plain HTTP in dev
-      MEDIA_ROOT: /data/recordings
-    volumes:
-      - /tmp/sticky-dvr-poc/recordings:/data/recordings:ro
+      COOKIE_SECURE: "false"

@@ -1,31 +1,33 @@
 VERSION := $(shell cat VERSION)
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
-BACKEND_IMAGE    := sticky-backend
-FRONTEND_IMAGE   := sticky-frontend
-PROXY_IMAGE      := sticky-proxy
-RECORDER_IMAGE   := sticky-recorder
+BACKEND_IMAGE     := sticky-backend
+FRONTEND_IMAGE    := sticky-frontend
+PROXY_IMAGE       := sticky-proxy
+RECORDER_IMAGE    := sticky-recorder
 THUMBNAILER_IMAGE := sticky-thumbnailer
-CONVERTER_IMAGE  := sticky-converter
+CONVERTER_IMAGE   := sticky-converter
 
-DIST := dist
-DEPLOY_DIST := dist/deploy
+OUTPUT ?= dist
+DIST   := $(OUTPUT)/docker
+BIN    := $(OUTPUT)/bin
 
 CSS_SRC := frontend/css/src
 CSS_OUT := frontend/css/style.css
 
 .PHONY: all build-backend build-initdb build-all build-css \
-        image-backend image-frontend image-proxy image-all \
-        image-poc-recorder image-poc-thumbnailer image-poc-converter image-poc-all \
-        run-backend run-postgres run-all \
+        image-backend image-frontend image-proxy \
+        image-recorder image-thumbnailer image-converter \
+        build \
+        run-postgres run-all stop down restart logs logs-all \
         export-backend export-frontend export-proxy \
-        export-poc-recorder export-poc-thumbnailer export-poc-converter export-poc-all \
-        dist-deploy \
-        bootstrap logs-all restart down \
-        dev dev-down \
-        dev-certs clean
+        export-recorder export-thumbnailer export-converter \
+        export compose configure config certs dist install \
+        bootstrap dev dev-down dev-certs \
+        test unit-test smoke-test \
+        clean
 
-# ---- build ----
+# ---- Go binaries (dist/bin/) ----
 
 all: build-all
 
@@ -53,22 +55,22 @@ build-css: ## Concatenate CSS source files into frontend/css/style.css
 	@echo "Built $(CSS_OUT)"
 
 build-backend:
-	mkdir -p $(DIST)
+	mkdir -p $(BIN)
 	cd backend && go build \
 		-ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" \
-		-o ../$(DIST)/sticky-backend \
+		-o ../$(BIN)/sticky-backend \
 		.
 
 build-initdb:
-	mkdir -p $(DIST)
+	mkdir -p $(BIN)
 	cd backend && go build \
 		-ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" \
-		-o ../$(DIST)/sticky-initdb \
+		-o ../$(BIN)/sticky-initdb \
 		./cmd/initdb/
 
 build-all: build-backend build-initdb
 
-# ---- docker images ----
+# ---- Docker images ----
 
 image-backend:
 	docker build \
@@ -93,21 +95,22 @@ image-proxy:
 		-t $(PROXY_IMAGE):latest \
 		.
 
-image-all: image-backend image-frontend image-proxy
+image-recorder:
+	$(MAKE) -C sticky-recorder/docker build
 
-# ---- bootstrap (zero-to-running) ----
+image-thumbnailer:
+	docker build \
+		-f Dockerfile.thumbnailer \
+		-t $(THUMBNAILER_IMAGE):$(VERSION) \
+		-t $(THUMBNAILER_IMAGE):latest \
+		.
 
-bootstrap: ## Generate certs (if needed), build all images, and start the stack
-	@if [ ! -f certs/tls.crt ]; then \
-		echo "Generating self-signed TLS certs…"; \
-		$(MAKE) dev-certs; \
-	else \
-		echo "TLS certs already present, skipping cert generation."; \
-	fi
-	$(MAKE) image-all
-	docker compose up -d
+image-converter:
+	$(MAKE) -C sticky-converter/docker build
 
-# ---- run (docker compose) ----
+build: image-backend image-frontend image-proxy image-recorder image-thumbnailer image-converter ## Build all Docker images
+
+# ---- docker compose operations ----
 
 run-postgres:
 	docker compose up -d postgres
@@ -118,8 +121,7 @@ run-all:
 stop:
 	docker compose down
 
-down: ## Stop and remove all compose services
-	docker compose down
+down: stop
 
 restart: ## Restart all compose services without rebuilding
 	docker compose restart
@@ -138,28 +140,111 @@ dev: ## Start stack in HTTP-only dev mode (no TLS, no JWT, port 8080)
 dev-down: ## Stop HTTP-only dev stack
 	docker compose -f compose.yaml -f compose.override.http.yaml down
 
-# ---- export (save images to tar for airgapped deploy) ----
+# ---- individual image exports ----
 
 export-backend:
 	mkdir -p $(DIST)
 	docker save $(BACKEND_IMAGE):$(VERSION) $(BACKEND_IMAGE):latest | gzip > $(DIST)/$(BACKEND_IMAGE)-$(VERSION).tar.gz
-	@echo "Saved $(DIST)/$(BACKEND_IMAGE)-$(VERSION).tar.gz (tags: $(VERSION), latest)"
+	@echo "Saved $(DIST)/$(BACKEND_IMAGE)-$(VERSION).tar.gz"
 
 export-frontend:
 	mkdir -p $(DIST)
 	docker save $(FRONTEND_IMAGE):$(VERSION) $(FRONTEND_IMAGE):latest | gzip > $(DIST)/$(FRONTEND_IMAGE)-$(VERSION).tar.gz
-	@echo "Saved $(DIST)/$(FRONTEND_IMAGE)-$(VERSION).tar.gz (tags: $(VERSION), latest)"
+	@echo "Saved $(DIST)/$(FRONTEND_IMAGE)-$(VERSION).tar.gz"
 
 export-proxy:
 	mkdir -p $(DIST)
 	docker save $(PROXY_IMAGE):$(VERSION) $(PROXY_IMAGE):latest | gzip > $(DIST)/$(PROXY_IMAGE)-$(VERSION).tar.gz
-	@echo "Saved $(DIST)/$(PROXY_IMAGE)-$(VERSION).tar.gz (tags: $(VERSION), latest)"
+	@echo "Saved $(DIST)/$(PROXY_IMAGE)-$(VERSION).tar.gz"
 
-export-all: export-backend export-frontend export-proxy
+export-recorder:
+	mkdir -p $(DIST)
+	docker save $(RECORDER_IMAGE):$(VERSION) $(RECORDER_IMAGE):latest | gzip > $(DIST)/$(RECORDER_IMAGE)-$(VERSION).tar.gz
+	@echo "Saved $(DIST)/$(RECORDER_IMAGE)-$(VERSION).tar.gz"
 
-# ---- dev TLS certs (self-signed, includes localhost + all host LAN IPs as SANs) ----
+export-thumbnailer:
+	mkdir -p $(DIST)
+	docker save $(THUMBNAILER_IMAGE):$(VERSION) $(THUMBNAILER_IMAGE):latest | gzip > $(DIST)/$(THUMBNAILER_IMAGE)-$(VERSION).tar.gz
+	@echo "Saved $(DIST)/$(THUMBNAILER_IMAGE)-$(VERSION).tar.gz"
 
-dev-certs:
+export-converter:
+	mkdir -p $(DIST)
+	docker save $(CONVERTER_IMAGE):$(VERSION) $(CONVERTER_IMAGE):latest | gzip > $(DIST)/$(CONVERTER_IMAGE)-$(VERSION).tar.gz
+	@echo "Saved $(DIST)/$(CONVERTER_IMAGE)-$(VERSION).tar.gz"
+
+export: build ## Build and export all images to dist/docker/
+	mkdir -p $(DIST)
+	docker save $(BACKEND_IMAGE):$(VERSION)     $(BACKEND_IMAGE):latest     | gzip > $(DIST)/$(BACKEND_IMAGE)-$(VERSION).tar.gz
+	docker save $(FRONTEND_IMAGE):$(VERSION)    $(FRONTEND_IMAGE):latest    | gzip > $(DIST)/$(FRONTEND_IMAGE)-$(VERSION).tar.gz
+	docker save $(PROXY_IMAGE):$(VERSION)       $(PROXY_IMAGE):latest       | gzip > $(DIST)/$(PROXY_IMAGE)-$(VERSION).tar.gz
+	docker save $(RECORDER_IMAGE):$(VERSION)    $(RECORDER_IMAGE):latest    | gzip > $(DIST)/$(RECORDER_IMAGE)-$(VERSION).tar.gz
+	docker save $(THUMBNAILER_IMAGE):$(VERSION) $(THUMBNAILER_IMAGE):latest | gzip > $(DIST)/$(THUMBNAILER_IMAGE)-$(VERSION).tar.gz
+	docker save $(CONVERTER_IMAGE):$(VERSION)   $(CONVERTER_IMAGE):latest   | gzip > $(DIST)/$(CONVERTER_IMAGE)-$(VERSION).tar.gz
+
+# ---- dist sub-targets ----
+
+certs: ## Generate self-signed TLS cert into dist/docker/certs/ (skips if present)
+	@if [ ! -f $(DIST)/certs/tls.crt ]; then \
+		mkdir -p $(DIST)/certs; \
+		IPS=$$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$$' | sed 's/^/IP:/' | tr '\n' ',' | sed 's/,$$//'); \
+		SANS="DNS:localhost,IP:127.0.0.1"; \
+		if [ -n "$$IPS" ]; then SANS="$$SANS,$$IPS"; fi; \
+		echo "Generating cert with SANs: $$SANS"; \
+		openssl req -x509 -newkey rsa:4096 -nodes -days 365 \
+			-keyout $(DIST)/certs/tls.key -out $(DIST)/certs/tls.crt \
+			-subj '/CN=sticky-dvr' \
+			-addext "subjectAltName=$$SANS"; \
+	else \
+		echo "Certs already present at $(DIST)/certs/, skipping."; \
+	fi
+
+compose: ## Copy compose.yaml to dist/docker/
+	mkdir -p $(DIST)
+	cp compose.yaml $(DIST)/compose.yaml
+
+configure: ## Render config-templates into dist/docker/ (add MERGE_LOCAL=1 to include config.local.yaml)
+	mkdir -p $(DIST)/config
+	python3 scripts/configure.py --out $(DIST) $(if $(MERGE_LOCAL),--merge-local,)
+
+config: configure ## alias
+
+# ---- dist: full deploy package in dist/docker/ ----
+
+dist: export configure certs ## Build, export, and package everything needed to deploy
+	@echo ""
+	@echo "Deploy package ready at $(DIST)/"
+	@echo "  Images:  $(DIST)/*.tar.gz"
+	@echo "  Compose: $(DIST)/compose.yaml"
+	@echo "  Configs: $(DIST)/config/"
+	@echo ""
+	@echo "On the target host:"
+	@echo "  for f in *.tar.gz; do docker load -i \$$f; done"
+	@echo "  cp .env.example .env  # edit values"
+	@echo "  docker compose --env-file .env up -d"
+
+# ---- install: build images and start the stack locally ----
+
+install: build configure ## Build images, render config, and start the stack
+	@if [ ! -f certs/tls.crt ]; then \
+		echo "No certs found — generating self-signed certs…"; \
+		$(MAKE) dev-certs; \
+	fi
+	docker compose up -d
+
+# ---- bootstrap: first-time setup (certs + install) ----
+
+bootstrap: ## Generate certs if needed, then install
+	@if [ ! -f certs/tls.crt ]; then \
+		echo "Generating self-signed TLS certs…"; \
+		$(MAKE) dev-certs; \
+	else \
+		echo "TLS certs already present, skipping cert generation."; \
+	fi
+	$(MAKE) install
+
+# ---- dev TLS certs ----
+
+dev-certs: ## Generate self-signed TLS cert with localhost + LAN IP SANs
 	mkdir -p certs
 	@IPS=$$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$$' | sed 's/^/IP:/' | tr '\n' ',' | sed 's/,$$//'); \
 	SANS="DNS:localhost,IP:127.0.0.1"; \
@@ -170,90 +255,61 @@ dev-certs:
 		-subj '/CN=sticky-dvr' \
 		-addext "subjectAltName=$$SANS"
 
-# ---- PoC images (recorder + thumbnailer + converter) ----
-# Build context is the parent directory (../) so all sibling repos are accessible.
+# ---- tests ----
 
-image-poc-recorder: ## Build sticky-recorder:poc image (recorder + ffmpeg)
-	docker build \
-		-f poc/Dockerfile.recorder \
-		-t $(RECORDER_IMAGE):$(VERSION) \
-		-t $(RECORDER_IMAGE):poc \
-		-t $(RECORDER_IMAGE):latest \
-		..
+SMOKE_PROJECT ?= sticky-smoke-$(shell date +%s)
 
-image-poc-thumbnailer: ## Build sticky-thumbnailer:poc image
-	docker build \
-		-f poc/Dockerfile.thumbnailer \
-		-t $(THUMBNAILER_IMAGE):$(VERSION) \
-		-t $(THUMBNAILER_IMAGE):poc \
-		-t $(THUMBNAILER_IMAGE):latest \
-		..
+unit-test: ## Run Go unit tests (no containers)
+	cd backend && go test ./...
 
-image-poc-converter: ## Build sticky-converter:poc image (linuxserver/ffmpeg + NVENC)
-	docker build \
-		-f poc/Dockerfile.converter \
-		-t $(CONVERTER_IMAGE):$(VERSION) \
-		-t $(CONVERTER_IMAGE):poc \
-		-t $(CONVERTER_IMAGE):latest \
-		..
+test: build configure ## Build, launch stack, verify health, run tests, tear down
+	@echo "Starting test stack (project: $(SMOKE_PROJECT))…"
+	docker compose -p $(SMOKE_PROJECT) -f $(DIST)/compose.yaml up -d
+	@TIMEOUT=120; ELAPSED=0; INTERVAL=5; \
+	while [ $$ELAPSED -lt $$TIMEOUT ]; do \
+		UNHEALTHY=$$(docker compose -p $(SMOKE_PROJECT) -f $(DIST)/compose.yaml ps --format json \
+			| jq -r 'select(.Health != "" and .Health != "healthy") | .Name' \
+			| wc -l | tr -d ' '); \
+		if [ "$$UNHEALTHY" = "0" ]; then \
+			echo "All services healthy after $$ELAPSED s"; \
+			break; \
+		fi; \
+		echo "Waiting… ($$ELAPSED s elapsed, $$UNHEALTHY services not yet healthy)"; \
+		sleep $$INTERVAL; ELAPSED=$$((ELAPSED + INTERVAL)); \
+	done; \
+	if [ $$ELAPSED -ge $$TIMEOUT ]; then \
+		echo "TIMEOUT: not all services became healthy in $$TIMEOUT s"; \
+		docker compose -p $(SMOKE_PROJECT) -f $(DIST)/compose.yaml down -v; \
+		exit 1; \
+	fi
+	@echo "--- unit tests ---"
+	cd backend && go test ./...
+	@echo "--- api tests ---"
+	cd backend && TEST_ADDR=http://localhost go test -tags integration -v ./tests/integration/...
+	@echo "--- teardown ---"
+	docker compose -p $(SMOKE_PROJECT) -f $(DIST)/compose.yaml down -v
 
-image-poc-all: image-poc-recorder image-poc-thumbnailer image-poc-converter ## Build all PoC images
-
-# ---- export PoC images ----
-
-export-poc-recorder:
-	mkdir -p $(DEPLOY_DIST)
-	docker save $(RECORDER_IMAGE):$(VERSION) $(RECORDER_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(RECORDER_IMAGE)-$(VERSION).tar.gz
-	@echo "Saved $(DEPLOY_DIST)/$(RECORDER_IMAGE)-$(VERSION).tar.gz (tags: $(VERSION), latest)"
-
-export-poc-thumbnailer:
-	mkdir -p $(DEPLOY_DIST)
-	docker save $(THUMBNAILER_IMAGE):$(VERSION) $(THUMBNAILER_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(THUMBNAILER_IMAGE)-$(VERSION).tar.gz
-	@echo "Saved $(DEPLOY_DIST)/$(THUMBNAILER_IMAGE)-$(VERSION).tar.gz (tags: $(VERSION), latest)"
-
-export-poc-converter:
-	mkdir -p $(DEPLOY_DIST)
-	docker save $(CONVERTER_IMAGE):$(VERSION) $(CONVERTER_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(CONVERTER_IMAGE)-$(VERSION).tar.gz
-	@echo "Saved $(DEPLOY_DIST)/$(CONVERTER_IMAGE)-$(VERSION).tar.gz (tags: $(VERSION), latest)"
-
-export-poc-all: export-poc-recorder export-poc-thumbnailer export-poc-converter ## Export all PoC images to dist/deploy/
-
-# ---- dist-deploy: build + export everything + copy config ----
-
-dist-deploy: image-all image-poc-all ## Build all images, export to dist/deploy/, copy deploy configs
-	mkdir -p $(DEPLOY_DIST)/config $(DEPLOY_DIST)/compose
-	# Export core images (version + latest tags in each tar)
-	docker save $(BACKEND_IMAGE):$(VERSION)  $(BACKEND_IMAGE):latest  | gzip > $(DEPLOY_DIST)/$(BACKEND_IMAGE)-$(VERSION).tar.gz
-	docker save $(FRONTEND_IMAGE):$(VERSION) $(FRONTEND_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(FRONTEND_IMAGE)-$(VERSION).tar.gz
-	docker save $(PROXY_IMAGE):$(VERSION)    $(PROXY_IMAGE):latest    | gzip > $(DEPLOY_DIST)/$(PROXY_IMAGE)-$(VERSION).tar.gz
-	# Export PoC images (version + latest tags in each tar)
-	docker save $(RECORDER_IMAGE):$(VERSION)   $(RECORDER_IMAGE):latest   | gzip > $(DEPLOY_DIST)/$(RECORDER_IMAGE)-$(VERSION).tar.gz
-	docker save $(THUMBNAILER_IMAGE):$(VERSION) $(THUMBNAILER_IMAGE):latest | gzip > $(DEPLOY_DIST)/$(THUMBNAILER_IMAGE)-$(VERSION).tar.gz
-	docker save $(CONVERTER_IMAGE):$(VERSION)  $(CONVERTER_IMAGE):latest  | gzip > $(DEPLOY_DIST)/$(CONVERTER_IMAGE)-$(VERSION).tar.gz
-	# Copy deploy configs
-	cp deploy/config/* $(DEPLOY_DIST)/config/
-	cp deploy/compose/* $(DEPLOY_DIST)/compose/
-	cp deploy/.env.example $(DEPLOY_DIST)/.env.example
-	@echo ""
-	@echo "Deploy package ready at $(DEPLOY_DIST)/"
-	@echo "  Images:  $(DEPLOY_DIST)/*.tar.gz"
-	@echo "  Configs: $(DEPLOY_DIST)/config/"
-	@echo "  Compose: $(DEPLOY_DIST)/compose/"
-	@echo ""
-	@echo "On the target host:"
-	@echo "  docker network create sticky-dvr"
-	@echo "  for f in $(DEPLOY_DIST)/*.tar.gz; do docker load -i \$$f; done"
-	@echo "  cp $(DEPLOY_DIST)/.env.example /opt/sticky-dvr/.env  # edit values"
-	@echo "  docker compose -f $(DEPLOY_DIST)/compose/postgres.yaml    --env-file /opt/sticky-dvr/.env up -d"
-	@echo "  docker compose -f $(DEPLOY_DIST)/compose/backend.yaml     --env-file /opt/sticky-dvr/.env up -d"
-	@echo "  docker compose -f $(DEPLOY_DIST)/compose/frontend.yaml    --env-file /opt/sticky-dvr/.env up -d"
-	@echo "  docker compose -f $(DEPLOY_DIST)/compose/fileserver.yaml  --env-file /opt/sticky-dvr/.env up -d"
-	@echo "  docker compose -f $(DEPLOY_DIST)/compose/overseer.yaml    --env-file /opt/sticky-dvr/.env up -d"
-	@echo "  docker compose -f $(DEPLOY_DIST)/compose/thumbnailer.yaml --env-file /opt/sticky-dvr/.env up -d"
-	@echo "  docker compose -f $(DEPLOY_DIST)/compose/converter.yaml   --env-file /opt/sticky-dvr/.env up -d"
-	@echo "  docker compose -f $(DEPLOY_DIST)/compose/proxy.yaml       --env-file /opt/sticky-dvr/.env up -d"
+smoke-test: build configure certs ## Launch stack, verify health, tear down
+	@echo "Starting smoke test (project: $(SMOKE_PROJECT))…"
+	docker compose -p $(SMOKE_PROJECT) up -d
+	@TIMEOUT=120; ELAPSED=0; INTERVAL=5; \
+	while [ $$ELAPSED -lt $$TIMEOUT ]; do \
+		UNHEALTHY=$$(docker compose -p $(SMOKE_PROJECT) ps --format json \
+			| jq -r 'select(.Health != "" and .Health != "healthy") | .Name' \
+			| wc -l | tr -d ' '); \
+		if [ "$$UNHEALTHY" = "0" ]; then \
+			echo "All services healthy after $$ELAPSED s"; \
+			docker compose -p $(SMOKE_PROJECT) down -v; \
+			exit 0; \
+		fi; \
+		echo "Waiting… ($$ELAPSED s elapsed, $$UNHEALTHY services not yet healthy)"; \
+		sleep $$INTERVAL; ELAPSED=$$((ELAPSED + INTERVAL)); \
+	done; \
+	echo "TIMEOUT: not all services became healthy in $$TIMEOUT s"; \
+	docker compose -p $(SMOKE_PROJECT) down -v; \
+	exit 1
 
 # ---- clean ----
 
 clean:
-	rm -rf $(DIST)/sticky-backend $(DIST)/sticky-initdb
+	rm -rf $(OUTPUT)/

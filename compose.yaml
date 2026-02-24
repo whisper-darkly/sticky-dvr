@@ -1,15 +1,18 @@
 services:
+
+  # ─── infrastructure ───────────────────────────────────────────────────────
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: postgres
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: changeme-admin
+      POSTGRES_USER: ${PG_ADMIN_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_ADMIN_PASSWORD:-changeme-admin}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${PG_ADMIN_USER:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -22,13 +25,11 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      # App database connection (what the backend will use).
-      DB_DSN: postgres://sticky:changeme@postgres:5432/sticky?sslmode=disable
+      DB_DSN: ${DB_DSN:-postgres://sticky:changeme@postgres:5432/sticky?sslmode=disable}
+      PG_ADMIN_USER: ${PG_ADMIN_USER:-postgres}
+      PG_ADMIN_PASSWORD: ${PG_ADMIN_PASSWORD:-changeme-admin}
 
-      # Postgres superuser credentials — used ONLY by db-init to create
-      # the app DB and role on first run. Omit both to skip that step.
-      PG_ADMIN_USER: postgres
-      PG_ADMIN_PASSWORD: changeme-admin
+  # ─── sticky-dvr core ──────────────────────────────────────────────────────
 
   backend:
     image: sticky-backend:latest
@@ -36,18 +37,17 @@ services:
     depends_on:
       db-init:
         condition: service_completed_successfully
-    # Port 8080 not exposed directly; traffic comes through sticky-proxy.
-    # Uncomment for development without proxy:
-    # ports:
-    #   - "8080:8080"
     environment:
       BACKEND_PORT: 8080
-      DB_DSN: postgres://sticky:changeme@postgres:5432/sticky?sslmode=disable
-      JWT_SECRET: change-me-in-production
-      OVERSEER_URL: ws://overseer:8080/ws
-      CONVERTER_URL: ws://converter:8080/ws
-      ADMIN_USERNAME: admin
-      ADMIN_PASSWORD: admin  # Change this for production deployments
+      DB_DSN: ${DB_DSN:-postgres://sticky:changeme@postgres:5432/sticky?sslmode=disable}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      OVERSEER_URL: ${OVERSEER_URL:-ws://overseer:8080/ws}
+      CONVERTER_URL: ${CONVERTER_URL:-ws://converter:8080/ws}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      MEDIA_ROOT: /data/recordings
+    volumes:
+      - ${RECORDINGS_DIR:-./data/recordings}:/data/recordings:ro
 
   frontend:
     image: sticky-frontend:latest
@@ -60,21 +60,76 @@ services:
       - backend
       - frontend
     ports:
-      - "80:80"
-      - "443:443"
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
     environment:
-      JWT_SECRET: change-me-in-production  # Must match backend JWT_SECRET
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
     volumes:
-      # Mount TLS certificates.  Generate self-signed for dev:
-      #   openssl req -x509 -newkey rsa:4096 -nodes -days 365 \
-      #     -keyout certs/tls.key -out certs/tls.crt -subj '/CN=localhost'
-      - ./certs:/etc/nginx/certs:ro
+      - ${CERTS_DIR:-./certs}:/etc/nginx/certs:ro
 
-  # converter:
-  #   image: sticky-converter:latest
-  #   restart: unless-stopped
-  #   # WebSocket API at /ws (sticky-overseer v2 protocol)
-  #   # backend connects via CONVERTER_URL: ws://converter:8080/ws
+  # ─── file server (nginx autoindex of recordings dir) ──────────────────────
 
-volumes:
-  postgres_data:
+  fileserver:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_DIR:-./dist/docker/config}/fileserver.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${RECORDINGS_DIR:-./data/recordings}:/data:ro
+
+  # ─── recorder ─────────────────────────────────────────────────────────────
+
+  overseer:
+    image: sticky-recorder:latest
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_DIR:-./dist/docker/config}/overseer-config.yaml:/etc/sticky-overseer/config.yaml:ro
+      - ${DATA_DIR:-./data}/overseer:/data
+      - ${RECORDINGS_DIR:-./data/recordings}:/data/recordings
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qSO- http://localhost:8080/ws 2>&1 | grep -q '400 Bad Request'"]
+      start_period: 10s
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── thumbnailer ──────────────────────────────────────────────────────────
+
+  thumbnailer:
+    image: sticky-thumbnailer:latest
+    restart: unless-stopped
+    volumes:
+      - ${CONFIG_DIR:-./dist/docker/config}/thumbnailer-config.yaml:/data/config.yaml:ro
+      - ${RECORDINGS_DIR:-./data/recordings}:/recordings
+      - ${DATA_DIR:-./data}/thumbnailer:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/openapi.json"]
+      start_period: 10s
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── converter ────────────────────────────────────────────────────────────
+
+  converter:
+    image: sticky-converter:latest
+    restart: unless-stopped
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ${CONFIG_DIR:-./dist/docker/config}/converter-config.yaml:/data/config.yaml:ro
+      - ${RECORDINGS_DIR:-./data/recordings}:/recordings
+      - ${DATA_DIR:-./data}/converter:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/openapi.json"]
+      start_period: 10s
+      interval: 15s
+      timeout: 5s
+      retries: 3
