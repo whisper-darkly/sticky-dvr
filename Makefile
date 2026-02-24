@@ -96,7 +96,7 @@ image-proxy:
 		.
 
 image-recorder:
-	$(MAKE) -C sticky-recorder/docker build
+	$(MAKE) -C modules/sticky-recorder/docker build
 
 image-thumbnailer:
 	docker build \
@@ -106,7 +106,7 @@ image-thumbnailer:
 		.
 
 image-converter:
-	$(MAKE) -C sticky-converter/docker build
+	$(MAKE) -C modules/sticky-converter/docker build
 
 build: image-backend image-frontend image-proxy image-recorder image-thumbnailer image-converter ## Build all Docker images
 

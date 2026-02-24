@@ -1,6 +1,6 @@
 [submodule "sticky-recorder"]
-	path = sticky-recorder
+	path = modules/sticky-recorder
 	url = https://github.com/whisper-darkly/sticky-recorder.git
 [submodule "sticky-converter"]
-	path = sticky-converter
+	path = modules/sticky-converter
 	url = https://github.com/whisper-darkly/sticky-converter.git
