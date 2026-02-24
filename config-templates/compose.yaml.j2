@@ -1,0 +1,141 @@
+{%- set data_dir = config.get('paths', {}).get('data_dir') -%}
+{%- set recordings_dir = config.get('paths', {}).get('recordings_dir') -%}
+services:
+
+  # ─── infrastructure ───────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: ${PG_ADMIN_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_ADMIN_PASSWORD:-changeme-admin}
+    volumes:
+      - {{ (data_dir ~ '/postgres') if data_dir else '${DATA_DIR:-./data}/postgres' }}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_ADMIN_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  db-init:
+    image: sticky-backend:latest
+    entrypoint: ["/usr/local/bin/sticky-initdb"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_DSN: ${DB_DSN}
+      PG_ADMIN_USER: ${PG_ADMIN_USER:-postgres}
+      PG_ADMIN_PASSWORD: ${PG_ADMIN_PASSWORD}
+
+  # ─── sticky-dvr core ──────────────────────────────────────────────────────
+
+  backend:
+    image: sticky-backend:latest
+    restart: unless-stopped
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    environment:
+      BACKEND_PORT: 8080
+      DB_DSN: ${DB_DSN}
+      JWT_SECRET: ${JWT_SECRET}
+      OVERSEER_URL: ${OVERSEER_URL:-ws://overseer:8080/ws}
+      CONVERTER_URL: ${CONVERTER_URL:-ws://converter:8080/ws}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      MEDIA_ROOT: /data/recordings
+    volumes:
+      - {{ recordings_dir if recordings_dir else '${RECORDINGS_DIR}' }}:/data/recordings:ro
+
+  frontend:
+    image: sticky-frontend:latest
+    restart: unless-stopped
+
+  proxy:
+    image: sticky-proxy:latest
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "{{ config.proxy.http_port }}:80"
+{% if config.proxy.tls %}
+      - "{{ config.proxy.https_port }}:443"
+{% endif %}
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
+
+  # ─── file server (nginx autoindex of recordings dir) ──────────────────────
+
+  fileserver:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./config/fileserver.conf:/etc/nginx/conf.d/default.conf:ro
+      - {{ recordings_dir if recordings_dir else '${RECORDINGS_DIR}' }}:/data:ro
+
+  # ─── recorder ─────────────────────────────────────────────────────────────
+
+  overseer:
+    image: sticky-recorder:latest
+    restart: unless-stopped
+    volumes:
+      - ./config/overseer-config.yaml:/etc/sticky-overseer/config.yaml:ro
+      - {{ (data_dir ~ '/overseer') if data_dir else '${DATA_DIR:-./data}/overseer' }}:/data
+      - {{ recordings_dir if recordings_dir else '${RECORDINGS_DIR}' }}:/data/recordings
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qSO- http://localhost:8080/ws 2>&1 | grep -q '400 Bad Request'"]
+      start_period: 10s
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── thumbnailer ──────────────────────────────────────────────────────────
+
+  thumbnailer:
+    image: sticky-thumbnailer:latest
+    restart: unless-stopped
+    volumes:
+      - ./config/thumbnailer-config.yaml:/data/config.yaml:ro
+      - {{ recordings_dir if recordings_dir else '${RECORDINGS_DIR}' }}:/recordings
+      - {{ (data_dir ~ '/thumbnailer') if data_dir else '${DATA_DIR:-./data}/thumbnailer' }}:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/openapi.json"]
+      start_period: 10s
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── converter ────────────────────────────────────────────────────────────
+
+  converter:
+    image: sticky-converter:latest
+    restart: unless-stopped
+{% if config.dvr.converter.gpu %}
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+{% endif %}
+    volumes:
+      - ./config/converter-config.yaml:/data/config.yaml:ro
+      - {{ recordings_dir if recordings_dir else '${RECORDINGS_DIR}' }}:/recordings
+      - {{ (data_dir ~ '/converter') if data_dir else '${DATA_DIR:-./data}/converter' }}:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/openapi.json"]
+      start_period: 10s
+      interval: 15s
+      timeout: 5s
+      retries: 3
