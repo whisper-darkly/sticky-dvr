@@ -1,3 +1,17 @@
+# Secrets are auto-generated into .secrets.yaml on first run.
+# Override any value here or in config.local.yaml to pin it.
+secrets:
+  jwt_secret: ""
+  db_admin_pass: ""
+  db_app_pass: ""
+  admin_password: ""
+
+db:
+  host: postgres
+  port: 5432
+  name: sticky
+  user: sticky
+
 dvr:
   sites:
     chaturbate: true
