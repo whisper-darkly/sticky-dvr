@@ -158,9 +158,7 @@ export-proxy:
 	@echo "Saved $(DIST)/$(PROXY_IMAGE)-$(VERSION).tar.gz"
 
 export-recorder:
-	mkdir -p $(DIST)
-	docker save $(RECORDER_IMAGE):$(VERSION) $(RECORDER_IMAGE):latest | gzip > $(DIST)/$(RECORDER_IMAGE)-$(VERSION).tar.gz
-	@echo "Saved $(DIST)/$(RECORDER_IMAGE)-$(VERSION).tar.gz"
+	$(MAKE) -C modules/sticky-recorder/docker export DIST_DIR=$(abspath $(DIST))
 
 export-thumbnailer:
 	mkdir -p $(DIST)
@@ -168,18 +166,16 @@ export-thumbnailer:
 	@echo "Saved $(DIST)/$(THUMBNAILER_IMAGE)-$(VERSION).tar.gz"
 
 export-converter:
-	mkdir -p $(DIST)
-	docker save $(CONVERTER_IMAGE):$(VERSION) $(CONVERTER_IMAGE):latest | gzip > $(DIST)/$(CONVERTER_IMAGE)-$(VERSION).tar.gz
-	@echo "Saved $(DIST)/$(CONVERTER_IMAGE)-$(VERSION).tar.gz"
+	$(MAKE) -C modules/sticky-converter/docker export DIST_DIR=$(abspath $(DIST))
 
 export: build ## Build and export all images to dist/docker/
 	mkdir -p $(DIST)
 	docker save $(BACKEND_IMAGE):$(VERSION)     $(BACKEND_IMAGE):latest     | gzip > $(DIST)/$(BACKEND_IMAGE)-$(VERSION).tar.gz
 	docker save $(FRONTEND_IMAGE):$(VERSION)    $(FRONTEND_IMAGE):latest    | gzip > $(DIST)/$(FRONTEND_IMAGE)-$(VERSION).tar.gz
 	docker save $(PROXY_IMAGE):$(VERSION)       $(PROXY_IMAGE):latest       | gzip > $(DIST)/$(PROXY_IMAGE)-$(VERSION).tar.gz
-	docker save $(RECORDER_IMAGE):$(VERSION)    $(RECORDER_IMAGE):latest    | gzip > $(DIST)/$(RECORDER_IMAGE)-$(VERSION).tar.gz
+	$(MAKE) -C modules/sticky-recorder/docker export DIST_DIR=$(abspath $(DIST))
 	docker save $(THUMBNAILER_IMAGE):$(VERSION) $(THUMBNAILER_IMAGE):latest | gzip > $(DIST)/$(THUMBNAILER_IMAGE)-$(VERSION).tar.gz
-	docker save $(CONVERTER_IMAGE):$(VERSION)   $(CONVERTER_IMAGE):latest   | gzip > $(DIST)/$(CONVERTER_IMAGE)-$(VERSION).tar.gz
+	$(MAKE) -C modules/sticky-converter/docker export DIST_DIR=$(abspath $(DIST))
 
 # ---- dist sub-targets ----
 
