@@ -1344,22 +1344,23 @@ func taskMaps(tasks []overseer.TaskInfo) (byTaskID map[string]overseer.TaskInfo,
 
 // bulkStart launches startWorker for each id with bounded concurrency so that
 // a large number of simultaneous starts doesn't flood the overseer's confirmation
-// queue and trigger timeouts. It returns as soon as all goroutines are dispatched
-// (they run in the background); callers do not need to wait for completion.
+// queue and trigger timeouts. Returns immediately; dispatch runs in the background.
 func (m *Manager) bulkStart(ids []int64) {
 	concurrency := m.cfg.Get().StartConcurrency
 	if concurrency <= 0 {
 		concurrency = 5
 	}
-	sem := make(chan struct{}, concurrency)
-	for _, id := range ids {
-		id := id
-		sem <- struct{}{} // block until a slot is free
-		go func() {
-			defer func() { <-sem }()
-			m.startWorker(id)
-		}()
-	}
+	go func() {
+		sem := make(chan struct{}, concurrency)
+		for _, id := range ids {
+			id := id
+			sem <- struct{}{} // block until a slot is free
+			go func() {
+				defer func() { <-sem }()
+				m.startWorker(id)
+			}()
+		}
+	}()
 }
 
 // ---- internal helpers ----
