@@ -177,6 +177,17 @@ image-proxy     # docker build -f Dockerfile.proxy      (nginx + JWT plugin)
 
 ---
 
+## Versioning
+
+- All repos in this network use a `./VERSION` file (plain `MAJOR.MINOR.PATCH`) to
+  track the current version. This is the source of truth — not go.mod, not a tag.
+- When committing functional changes, bump `VERSION` in the same commit. At minimum,
+  increment the patch. Use minor for new features, major for breaking changes.
+- When asked to "bump" or "tag", update `VERSION` first, then tag to match.
+- Git tags are `v`-prefixed: `v0.3.0` for VERSION `0.3.0`.
+
+---
+
 ## Key Conventions
 
 - Go 1.22+ stdlib `net/http` mux (no third-party router).
