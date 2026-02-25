@@ -42,9 +42,9 @@ import (
 )
 
 func main() {
-	dbDSN := os.Getenv("DB_DSN")
+	dbDSN := buildDSN()
 	if dbDSN == "" {
-		log.Fatal("DB_DSN is required")
+		log.Fatal("DB_DSN or PG_USER/PG_PASSWORD/PG_DB required")
 	}
 
 	adminUser := os.Getenv("PG_ADMIN_USER")
@@ -172,6 +172,29 @@ func ensureDB(ctx context.Context, appDSN, adminUser, adminPass string) error {
 
 	log.Printf("initdb: privileges granted on %q to %q", appDB, appUser)
 	return nil
+}
+
+// buildDSN returns DB_DSN if set, otherwise constructs one from PG_* vars.
+func buildDSN() string {
+	if dsn := os.Getenv("DB_DSN"); dsn != "" {
+		return dsn
+	}
+	user := os.Getenv("PG_USER")
+	pass := os.Getenv("PG_PASSWORD")
+	if user == "" || pass == "" {
+		return ""
+	}
+	host := envOr("PG_HOST", "postgres")
+	port := envOr("PG_PORT", "5432")
+	name := envOr("PG_DB", "sticky")
+	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", user, pass, host, port, name)
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 // isDuplicateObject returns true if err is a PostgreSQL "duplicate_object" (42710) error.

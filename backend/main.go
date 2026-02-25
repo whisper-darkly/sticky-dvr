@@ -25,9 +25,9 @@ func main() {
 	port := env("BACKEND_PORT", "8080")
 	overseerURL := env("OVERSEER_URL", "ws://localhost:8081/ws")
 
-	dbDSN := os.Getenv("DB_DSN")
+	dbDSN := buildDSN()
 	if dbDSN == "" {
-		log.Fatal("DB_DSN environment variable is required")
+		log.Fatal("DB_DSN or PG_USER/PG_PASSWORD/PG_DB required")
 	}
 
 	jwtSecret := os.Getenv("JWT_SECRET")
@@ -153,4 +153,20 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// buildDSN returns DB_DSN if set, otherwise constructs one from PG_* vars.
+func buildDSN() string {
+	if dsn := os.Getenv("DB_DSN"); dsn != "" {
+		return dsn
+	}
+	user := os.Getenv("PG_USER")
+	pass := os.Getenv("PG_PASSWORD")
+	if user == "" || pass == "" {
+		return ""
+	}
+	host := env("PG_HOST", "postgres")
+	port := env("PG_PORT", "5432")
+	name := env("PG_DB", "sticky")
+	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", user, pass, host, port, name)
 }
