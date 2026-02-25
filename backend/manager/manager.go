@@ -79,6 +79,14 @@ type SubscriptionStatus struct {
 	CreatedAt time.Time     `json:"created_at"`
 	UpdatedAt time.Time     `json:"updated_at"`
 
+	// Status is the single resolved status for display.
+	//   inactive  — posture is paused or archived
+	//   error     — worker hit error threshold, needs reset
+	//   starting  — worker process not yet confirmed running
+	//   waiting   — process running, source not currently live
+	//   recording — actively capturing
+	Status string `json:"status"`
+
 	// Runtime (from overseer)
 	WorkerState  string   `json:"worker_state"` // idle | starting | running | errored
 	PID          int      `json:"pid,omitempty"`
@@ -86,7 +94,7 @@ type SubscriptionStatus struct {
 	Logs         []string `json:"logs"`
 
 	// Recording-level state derived from recorder JSON output events.
-	RecordingState  string     `json:"recording_state,omitempty"`  // recording | sleeping | idle
+	RecordingState  string     `json:"recording_state,omitempty"` // recording | sleeping | idle
 	SessionDuration string     `json:"session_duration,omitempty"`
 	LastHeartbeat   time.Time  `json:"last_heartbeat,omitempty"`
 	LastRecordingAt *time.Time `json:"last_recording_at,omitempty"`
@@ -1413,6 +1421,7 @@ func (m *Manager) statusFor(src *store.Source, sub *store.Subscription) *Subscri
 
 	if state == nil {
 		s.WorkerState = "idle"
+		s.Status = resolveStatus(sub.Posture, "idle", "", false)
 		return s
 	}
 
@@ -1436,12 +1445,33 @@ func (m *Manager) statusFor(src *store.Source, sub *store.Subscription) *Subscri
 	}
 	state.mu.Unlock()
 
+	s.Status = resolveStatus(sub.Posture, s.WorkerState, s.RecordingState, s.SessionActive)
+
 	// Populate canonical URL from config driver_urls.
 	if tmpl := m.cfg.Get().DriverURLs[src.Driver]; tmpl != "" {
 		s.CanonicalURL = strings.ReplaceAll(tmpl, "{{.Username}}", src.Username)
 	}
 
 	return s
+}
+
+// resolveStatus collapses posture + worker state + recording state + session
+// into a single human-readable status for the list/dashboard view.
+func resolveStatus(posture store.Posture, workerState, recordingState string, sessionActive bool) string {
+	if posture == store.PosturePaused || posture == store.PostureArchived {
+		return "inactive"
+	}
+	switch workerState {
+	case "errored":
+		return "error"
+	case "running":
+		if recordingState == "recording" || sessionActive {
+			return "recording"
+		}
+		return "waiting"
+	default: // idle, starting, or anything unexpected
+		return "starting"
+	}
 }
 
 func parseDuration(s string, def time.Duration) time.Duration {
