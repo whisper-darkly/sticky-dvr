@@ -185,11 +185,7 @@ func (m *Manager) reconcileStartup(ctx context.Context) {
 		log.Printf("manager: startup overseer list failed (will start fresh): %v", err)
 	}
 
-	// Build task_id → TaskInfo map for quick lookup.
-	byTaskID := make(map[string]overseer.TaskInfo, len(tasks))
-	for _, t := range tasks {
-		byTaskID[t.TaskID] = t
-	}
+	byTaskID, byKey := taskMaps(tasks)
 
 	m.mu.RLock()
 	ids := make([]int64, 0, len(m.states))
@@ -198,6 +194,7 @@ func (m *Manager) reconcileStartup(ctx context.Context) {
 	}
 	m.mu.RUnlock()
 
+	var toStart []int64
 	for _, id := range ids {
 		state := m.stateByID(id)
 		if state == nil {
@@ -211,23 +208,26 @@ func (m *Manager) reconcileStartup(ctx context.Context) {
 
 		if taskID != "" {
 			if t, ok := byTaskID[taskID]; ok && t.WorkerState == "running" {
-				state.mu.Lock()
-				state.pid = t.CurrentPID
-				state.workerState = "running"
-				state.mu.Unlock()
-				log.Printf("manager: claimed existing task=%s pid=%d for %s/%s", taskID, t.CurrentPID, driver, username)
-				state.addLog(fmt.Sprintf("[system] claimed existing worker task=%s pid=%d", taskID, t.CurrentPID))
-				// Subscribe to task-specific events: the overseer only broadcasts
-				// output/started/exited to subscribed clients; claiming via List is
-				// not enough. Ignore errors — reconnect will retry via OnConnected.
-				if err := m.oc.Subscribe(taskID); err != nil {
-					log.Printf("manager: subscribe task=%s: %v", taskID, err)
-				}
+				log.Printf("manager: startup: claimed task=%s pid=%d for %s/%s", taskID, t.CurrentPID, driver, username)
+				m.claimTask(ctx, id, state, taskID, t)
 				continue
 			}
 		}
-		// No running task — start one.
-		go m.startWorker(id)
+
+		// Check by action/source key in case the task ID changed.
+		key := driver + "/" + username
+		if t, ok := byKey[key]; ok && t.WorkerState == "running" {
+			log.Printf("manager: startup: claimed untracked task=%s pid=%d for %s/%s", t.TaskID, t.CurrentPID, driver, username)
+			m.claimTask(ctx, id, state, taskID, t)
+			continue
+		}
+
+		toStart = append(toStart, id)
+	}
+
+	if len(toStart) > 0 {
+		log.Printf("manager: startup: starting %d worker(s)", len(toStart))
+		m.bulkStart(toStart)
 	}
 }
 
@@ -1081,23 +1081,143 @@ func (m *Manager) RestartAll(ctx context.Context, includeErrored bool) (restarte
 }
 
 // OnConnected is called each time the overseer WebSocket connection is established.
-// It re-subscribes to all tracked tasks so that task-specific events (output,
-// started, exited, etc.) are received after reconnects.
+// It reconciles in-memory state against the live overseer: claims tasks that are
+// still running (same overseer instance reconnect) and restarts workers for any
+// source with active subscriptions whose task was lost (overseer restart).
 func (m *Manager) OnConnected() {
+	log.Printf("manager: overseer connected, reconciling")
+	ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+	defer cancel()
+	m.reconcileOnConnect(ctx)
+}
+
+// reconcileOnConnect is the full reconnect reconciliation. For each source it
+// either claims the still-running overseer task, or (re)starts the worker if
+// the source has active subscriptions but no running task. Errored sources are
+// left alone — they require an explicit reset.
+func (m *Manager) reconcileOnConnect(ctx context.Context) {
+	tasks, err := m.oc.List(ctx)
+	if err != nil {
+		log.Printf("manager: reconnect reconcile: overseer list: %v", err)
+		return
+	}
+
+	byTaskID, byKey := taskMaps(tasks)
+
 	m.mu.RLock()
-	taskIDs := make([]string, 0, len(m.taskIdx))
-	for taskID := range m.taskIdx {
-		taskIDs = append(taskIDs, taskID)
+	ids := make([]int64, 0, len(m.states))
+	for id := range m.states {
+		ids = append(ids, id)
 	}
 	m.mu.RUnlock()
 
-	for _, taskID := range taskIDs {
-		if err := m.oc.Subscribe(taskID); err != nil {
-			log.Printf("manager: resubscribe task=%s: %v", taskID, err)
+	var toStart []int64
+	claimed := 0
+	for _, id := range ids {
+		state := m.stateByID(id)
+		if state == nil {
+			continue
 		}
+
+		state.mu.Lock()
+		taskID := state.source.OverseerTaskID
+		driver := state.source.Driver
+		username := state.source.Username
+		wsState := state.workerState
+		state.mu.Unlock()
+
+		// Don't touch errored sources — require explicit reset-error.
+		if wsState == "errored" {
+			continue
+		}
+
+		if taskID != "" {
+			if t, ok := byTaskID[taskID]; ok && t.WorkerState == "running" {
+				log.Printf("manager: reconnect: claimed task=%s pid=%d for %s/%s", taskID, t.CurrentPID, driver, username)
+				m.claimTask(ctx, id, state, taskID, t)
+				claimed++
+				continue
+			}
+		}
+
+		// Task is gone (or was never assigned). Only restart if there are
+		// active subscriptions; otherwise the source is intentionally idle.
+		count, err := m.st.GetSourceActiveSubscriberCount(ctx, id)
+		if err != nil {
+			log.Printf("manager: reconnect: active sub count source=%d: %v", id, err)
+			continue
+		}
+		if count == 0 {
+			// Paused/archived — ensure state is consistent.
+			state.mu.Lock()
+			if wsState == "running" {
+				state.workerState = "idle"
+				state.pid = 0
+			}
+			state.mu.Unlock()
+			continue
+		}
+
+		// Before starting fresh, check whether the overseer already has a
+		// running task for this source under an unknown task ID (e.g., a
+		// previous start confirmation arrived late and was never persisted).
+		key := driver + "/" + username
+		if t, ok := byKey[key]; ok && t.WorkerState == "running" {
+			log.Printf("manager: reconnect: found untracked task=%s pid=%d for %s/%s, claiming", t.TaskID, t.CurrentPID, driver, username)
+			state.mu.Lock()
+			if wsState == "running" || wsState == "starting" {
+				state.workerState = "idle"
+				state.pid = 0
+			}
+			state.mu.Unlock()
+			m.claimTask(ctx, id, state, taskID, t)
+			claimed++
+			continue
+		}
+
+		// Has active subscriptions but no running task — queue for (re)start.
+		log.Printf("manager: reconnect: source=%d %s/%s missing task, will restart", id, driver, username)
+		state.mu.Lock()
+		if wsState == "running" || wsState == "starting" {
+			state.workerState = "idle"
+			state.pid = 0
+		}
+		state.mu.Unlock()
+		toStart = append(toStart, id)
 	}
-	if len(taskIDs) > 0 {
-		log.Printf("manager: re-subscribed to %d task(s) after overseer connect", len(taskIDs))
+
+	started := len(toStart)
+	if started > 0 {
+		m.bulkStart(toStart)
+	}
+	log.Printf("manager: reconnect reconcile: claimed=%d restarted=%d", claimed, started)
+}
+
+// claimTask updates in-memory state and subscribes to an overseer task that is
+// already running but not yet tracked (or tracked under a stale ID). The store
+// and taskIdx are updated if the task ID has changed.
+func (m *Manager) claimTask(ctx context.Context, sourceID int64, state *sourceState, oldTaskID string, t overseer.TaskInfo) {
+	if t.TaskID != oldTaskID {
+		if err := m.st.SetSourceTaskID(ctx, sourceID, t.TaskID); err != nil {
+			log.Printf("manager: claimTask: set task_id source=%d: %v", sourceID, err)
+		}
+		m.mu.Lock()
+		if oldTaskID != "" {
+			delete(m.taskIdx, oldTaskID)
+		}
+		m.taskIdx[t.TaskID] = sourceID
+		m.mu.Unlock()
+		state.mu.Lock()
+		state.source.OverseerTaskID = t.TaskID
+		state.mu.Unlock()
+	}
+	state.mu.Lock()
+	state.pid = t.CurrentPID
+	state.workerState = "running"
+	state.mu.Unlock()
+	state.addLog(fmt.Sprintf("[system] claimed running task=%s pid=%d", t.TaskID, t.CurrentPID))
+	if err := m.oc.Subscribe(t.TaskID); err != nil {
+		log.Printf("manager: claimTask: subscribe task=%s: %v", t.TaskID, err)
 	}
 }
 
@@ -1129,12 +1249,7 @@ func (m *Manager) reconcile(ctx context.Context) {
 		return
 	}
 
-	runningTasks := make(map[string]struct{})
-	for _, t := range tasks {
-		if t.WorkerState == "running" {
-			runningTasks[t.TaskID] = struct{}{}
-		}
-	}
+	byTaskID, byKey := taskMaps(tasks)
 
 	m.mu.RLock()
 	ids := make([]int64, 0, len(m.states))
@@ -1143,6 +1258,7 @@ func (m *Manager) reconcile(ctx context.Context) {
 	}
 	m.mu.RUnlock()
 
+	var toStart []int64
 	for _, id := range ids {
 		state := m.stateByID(id)
 		if state == nil {
@@ -1156,23 +1272,93 @@ func (m *Manager) reconcile(ctx context.Context) {
 		username := state.source.Username
 		state.mu.Unlock()
 
-		if wsState != "running" {
-			continue
-		}
-		if taskID == "" {
-			continue
-		}
-		if _, alive := runningTasks[taskID]; alive {
+		// Never interfere with errored or in-flight starts.
+		if wsState == "errored" || wsState == "starting" {
 			continue
 		}
 
-		log.Printf("manager: reconcile: task=%s for %s/%s gone, restarting", taskID, driver, username)
-		state.mu.Lock()
-		state.pid = 0
-		state.workerState = "idle"
-		state.mu.Unlock()
-		state.addLog("[system] worker gone (detected by reconciler), restarting")
-		go m.startWorker(id)
+		key := driver + "/" + username
+
+		if wsState == "running" {
+			if taskID != "" {
+				if _, alive := byTaskID[taskID]; alive {
+					continue // running as expected
+				}
+			}
+			log.Printf("manager: reconcile: task=%s for %s/%s gone, restarting", taskID, driver, username)
+			state.mu.Lock()
+			state.pid = 0
+			state.workerState = "idle"
+			state.mu.Unlock()
+			state.addLog("[system] worker gone (detected by reconciler), restarting")
+			go m.startWorker(id)
+			continue
+		}
+
+		// wsState == "idle": check whether this source should be running.
+		count, err := m.st.GetSourceActiveSubscriberCount(ctx, id)
+		if err != nil {
+			log.Printf("manager: reconcile: active sub count source=%d: %v", id, err)
+			continue
+		}
+		if count == 0 {
+			continue
+		}
+
+		// Active subscriptions exist but we think it's idle. Check whether
+		// the overseer has a running task we lost track of — most commonly
+		// from a start confirmation that arrived after our 20 s timeout.
+		if t, ok := byKey[key]; ok && t.WorkerState == "running" {
+			log.Printf("manager: reconcile: found untracked task=%s pid=%d for %s/%s, claiming", t.TaskID, t.CurrentPID, driver, username)
+			m.claimTask(ctx, id, state, taskID, t)
+			continue
+		}
+
+		// Nothing running — queue for start.
+		log.Printf("manager: reconcile: source=%d %s/%s is idle with active subs, will start", id, driver, username)
+		state.addLog("[system] detected idle with active subscriptions (reconciler), starting")
+		toStart = append(toStart, id)
+	}
+
+	if len(toStart) > 0 {
+		m.bulkStart(toStart)
+	}
+}
+
+// taskMaps builds two lookup tables from an overseer task list:
+//   - byTaskID: task_id → TaskInfo (all tasks)
+//   - byKey: "action/source" → TaskInfo (running tasks only, for unknown-ID matching)
+func taskMaps(tasks []overseer.TaskInfo) (byTaskID map[string]overseer.TaskInfo, byKey map[string]overseer.TaskInfo) {
+	byTaskID = make(map[string]overseer.TaskInfo, len(tasks))
+	byKey = make(map[string]overseer.TaskInfo, len(tasks))
+	for _, t := range tasks {
+		byTaskID[t.TaskID] = t
+		if t.WorkerState == "running" {
+			if src, ok := t.Params["source"]; ok && src != "" {
+				byKey[t.Action+"/"+src] = t
+			}
+		}
+	}
+	return
+}
+
+// bulkStart launches startWorker for each id with bounded concurrency so that
+// a large number of simultaneous starts doesn't flood the overseer's confirmation
+// queue and trigger timeouts. It returns as soon as all goroutines are dispatched
+// (they run in the background); callers do not need to wait for completion.
+func (m *Manager) bulkStart(ids []int64) {
+	concurrency := m.cfg.Get().StartConcurrency
+	if concurrency <= 0 {
+		concurrency = 5
+	}
+	sem := make(chan struct{}, concurrency)
+	for _, id := range ids {
+		id := id
+		sem <- struct{}{} // block until a slot is free
+		go func() {
+			defer func() { <-sem }()
+			m.startWorker(id)
+		}()
 	}
 }
 

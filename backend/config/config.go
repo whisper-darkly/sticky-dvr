@@ -35,6 +35,7 @@ type Data struct {
 
 	RestartDelay      string `json:"restart_delay"      yaml:"restart_delay"`
 	ReconcileInterval string `json:"reconcile_interval" yaml:"reconcile_interval"`
+	StartConcurrency  int    `json:"start_concurrency"  yaml:"start_concurrency"`
 	ErrorThreshold    int    `json:"error_threshold"    yaml:"error_threshold"`
 	ErrorWindow       string `json:"error_window"       yaml:"error_window"`
 
